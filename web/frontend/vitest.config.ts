@@ -12,6 +12,7 @@ export default defineConfig({
 		conditions: ['browser'],
 		alias: {
 			$lib: path.resolve(__dirname, 'src/lib'),
+			'$app/environment': path.resolve(__dirname, 'test/stubs/app/environment.ts'),
 			'$app/navigation': path.resolve(__dirname, 'test/stubs/app/navigation.ts'),
 		},
 	},
@@ -19,5 +20,6 @@ export default defineConfig({
 		include: ['src/**/*.{test,spec}.{js,ts}'],
 		environment: 'jsdom',
 		globals: true,
+		setupFiles: ['./test/stubs/setup.ts'],
 	},
 });

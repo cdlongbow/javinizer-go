@@ -164,6 +164,10 @@ func CreateTestDeps(t *testing.T, cfg *config.Config, configFile string) *core.A
 		CheckOrigin: func(_ *http.Request) bool { return true },
 	})
 
+	t.Cleanup(func() {
+		rtState.Shutdown()
+	})
+
 	// Store the runtime so tests can retrieve it via GetTestRuntime
 	runtimeMap.Store(deps, rt)
 
