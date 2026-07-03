@@ -28,6 +28,8 @@
 	import { toastStore } from '$lib/stores/toast';
 	import { createBatchJobsQuery, createConfigQuery } from '$lib/query/queries';
 	import type { BatchJobResponse, FileResult } from '$lib/api/types';
+	import { t } from '$lib/i18n/setup';
+	import { get } from 'svelte/store';
 
 	const queryClient = useQueryClient();
 
@@ -133,7 +135,7 @@
 		const clearableJobs = jobs.filter(job => job.status.toLowerCase() !== 'running');
 		if (clearableJobs.length === 0) return;
 
-		if (!(await confirmDialog('Clear Jobs', `Clear all non-running jobs? This will remove ${clearableJobs.length} job(s).`, { variant: 'danger', confirmLabel: 'Clear All' }))) return;
+		if (!(await confirmDialog(get(t)('jobs.clearDialog.title'), get(t)('jobs.clearDialog.message', { values: { count: clearableJobs.length } }), { variant: 'danger', confirmLabel: get(t)('jobs.clearDialog.confirm') }))) return;
 
 		isClearing = true;
 		let failedCount = 0;
@@ -212,10 +214,10 @@
 		const diffHours = Math.floor(diffMs / 3600000);
 		const diffDays = Math.floor(diffMs / 86400000);
 
-		if (diffMins < 1) return 'Just now';
-		if (diffMins < 60) return `${diffMins}m ago`;
-		if (diffHours < 24) return `${diffHours}h ago`;
-		if (diffDays < 7) return `${diffDays}d ago`;
+		if (diffMins < 1) return get(t)('jobs.justNow');
+		if (diffMins < 60) return `${diffMins}${get(t)('jobs.minutesAgo')}`;
+		if (diffHours < 24) return `${diffHours}${get(t)('jobs.hoursAgo')}`;
+		if (diffDays < 7) return `${diffDays}${get(t)('jobs.daysAgo')}`;
 		return new Intl.DateTimeFormat('en-US', { dateStyle: 'medium' }).format(date);
 	}
 
@@ -268,34 +270,34 @@
 	<div class="container mx-auto px-4 py-8 max-w-7xl">
 		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
 			<div>
-				<h1 class="text-2xl font-bold tracking-tight">Jobs</h1>
-				<p class="text-muted-foreground text-sm mt-1">Manage your batch jobs and organize history</p>
+				<h1 class="text-2xl font-bold tracking-tight">{$t('jobs.title')}</h1>
+				<p class="text-muted-foreground text-sm mt-1">{$t('jobs.description')}</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<Button variant="outline" size="sm" onclick={() => queryClient.invalidateQueries({ queryKey: ['batch-jobs'] })} disabled={isRefreshing || isClearing}>
 					<RefreshCw class="h-4 w-4 mr-1.5 {isRefreshing ? 'animate-spin' : ''}" />
-					Refresh
+					{$t('jobs.refresh')}
 				</Button>
 				<Button
 					variant="destructive"
 					size="sm"
 					onclick={clearAllJobs}
 					disabled={isClearing || jobs.length === 0 || jobs.every(j => j.status.toLowerCase() === 'running')}
-					title="Clear all completed, failed, cancelled jobs"
+					title={$t('jobs.clearDialog.message', { values: { count: jobs.filter(j => j.status.toLowerCase() !== 'running').length } })}
 				>
 					<Trash2 class="h-4 w-4 mr-1.5 {isClearing ? 'animate-pulse' : ''}" />
-					{isClearing ? 'Clearing...' : 'Clear All'}
+					{isClearing ? $t('jobs.clearing') : $t('jobs.clearAll')}
 				</Button>
 				<Button size="sm" onclick={() => goto('/browse')}>
 					<FolderOpen class="h-4 w-4 mr-1.5" />
-					New Scrape
+					{$t('jobs.newScrape')}
 				</Button>
 			</div>
 		</div>
 
 		<div class="flex items-center gap-2 mb-6 p-3 bg-card border border-border rounded-lg">
 			<Timer class="h-4 w-4 text-muted-foreground flex-shrink-0" />
-			<label class="text-sm text-muted-foreground whitespace-nowrap" for="older-than-days">Older than</label>
+			<label class="text-sm text-muted-foreground whitespace-nowrap" for="older-than-days">{$t('jobs.olderThan')}</label>
 			<input
 				id="older-than-days"
 				type="number"
@@ -303,7 +305,7 @@
 				min="1"
 				class="w-20 h-8 rounded-md border border-input bg-background px-2 text-sm"
 			/>
-			<span class="text-sm text-muted-foreground">days</span>
+			<span class="text-sm text-muted-foreground">{$t('jobs.days')}</span>
 			<div class="flex items-center gap-2 ml-2">
 								<Button
 					variant="destructive"
@@ -311,7 +313,7 @@
 					onclick={cleanHistory}
 					disabled={isCleaningHistory || isCleaningEvents || olderThanDays < 1}
 				>
-					{isCleaningHistory ? 'Cleaning...' : 'Clean History'}
+					{isCleaningHistory ? $t('jobs.cleaningHistory') : $t('jobs.cleanHistory')}
 				</Button>
 				<Button
 					variant="destructive"
@@ -319,7 +321,7 @@
 					onclick={cleanEvents}
 					disabled={isCleaningHistory || isCleaningEvents || olderThanDays < 1}
 				>
-					{isCleaningEvents ? 'Cleaning...' : 'Clean Events'}
+					{isCleaningEvents ? $t('jobs.cleaningEvents') : $t('jobs.cleanEvents')}
 				</Button>
 			</div>
 		</div>
@@ -344,7 +346,7 @@
 						size="sm"
 						onclick={() => setFilter(filter)}
 					>
-						{filter === 'all' ? 'All' : getStatusConfig(filter).label}
+						{filter === 'all' ? $t('jobs.filter.all') : getStatusConfig(filter).label}
 						<span class="ml-1.5 text-xs opacity-70">({count})</span>
 					</Button>
 				{/each}
@@ -355,21 +357,21 @@
 			<div class="flex items-center justify-center py-20">
 				<div class="text-center">
 					<Clock class="h-8 w-8 animate-spin mx-auto mb-3 text-muted-foreground" />
-					<p class="text-muted-foreground text-sm">Loading jobs...</p>
+					<p class="text-muted-foreground text-sm">{$t('jobs.loading')}</p>
 				</div>
 			</div>
 		{:else if jobs.length === 0}
 			<Card class="p-12 text-center">
 				<Activity class="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-				<p class="text-muted-foreground mb-4">No batch jobs yet</p>
+				<p class="text-muted-foreground mb-4">{$t('jobs.noJobs')}</p>
 				<Button onclick={() => goto('/browse')}>
 					<ArrowRight class="h-4 w-4 mr-1.5" />
-					Start Your First Scrape
+					{$t('jobs.startFirstScrape')}
 				</Button>
 			</Card>
 		{:else if filteredJobs.length === 0}
 			<Card class="p-8 text-center">
-				<p class="text-muted-foreground">No jobs match this filter</p>
+				<p class="text-muted-foreground">{$t('jobs.noJobsFilter')}</p>
 			</Card>
 		{:else}
 			<div class="space-y-3" in:fade={{ duration: 150 }}>
@@ -413,12 +415,12 @@
 											{getFileNames(job)}
 										</p>
 										<div class="flex items-center gap-4 text-xs text-muted-foreground">
-											<span>{job.total_files} file{job.total_files !== 1 ? 's' : ''}</span>
+											<span>{job.total_files} {$t('jobs.fileCount')}</span>
 											{#if job.completed > 0}
-												<span class="text-green-600">{job.completed} done</span>
+												<span class="text-green-600">{job.completed} {$t('jobs.done')}</span>
 											{/if}
 											{#if job.failed > 0}
-												<span class="text-red-500">{job.failed} failed</span>
+												<span class="text-red-500">{job.failed} {$t('jobs.failed')}</span>
 											{/if}
 											<span>{formatDate(job.started_at)}</span>
 										</div>
@@ -438,31 +440,31 @@
 									<div class="flex items-center gap-1.5 flex-shrink-0">
 										{#if job.status.toLowerCase() === 'running'}
 											<Button variant="destructive" size="sm" onclick={() => cancelJobMutation.mutate(job.id)} disabled={cancelJobMutation.isPending}>
-												Cancel
+												{$t('jobs.cancelBtn')}
 											</Button>
 											<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
 												<Eye class="h-4 w-4 mr-1" />
-												View
+												{$t('jobs.viewBtn')}
 											</Button>
 										{:else if job.status.toLowerCase() === 'completed'}
 											{#if job.completed > 0}
 												<Button variant="default" size="sm" onclick={() => goto(`/review/${job.id}`)}>
-													Review & Organize
+													{$t('jobs.reviewOrganize')}
 												</Button>
 											{/if}
 											{#if job.failed > 0}
-												<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title="View failed files in review">
+												<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title={$t('jobs.viewBtn')}>
 													<Eye class="h-4 w-4 mr-1" />
-													{job.completed > 0 ? 'Review Failed' : 'View Failed'}
+													{job.completed > 0 ? $t('jobs.reviewFailed') : $t('jobs.viewFailed')}
 												</Button>
 											{/if}
-											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title={$t('jobs.dismiss')}>
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else if job.status.toLowerCase() === 'organized'}
 											<Button variant="secondary" size="sm" onclick={() => goto(`/jobs/${job.id}`)}>
 												<ArrowRight class="h-4 w-4 mr-1" />
-												View Details
+												{$t('jobs.viewDetails')}
 											</Button>
 											{#if config?.output?.allow_revert}
 											<Button
@@ -471,22 +473,22 @@
 												onclick={() => openRevertModal(job.id, getRevertableCount(job))}
 											>
 												<Undo2 class="h-4 w-4 mr-1" />
-												Revert
+												{$t('jobs.revertBtn')}
 											</Button>
 											{/if}
-											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title={$t('jobs.dismiss')}>
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else if job.status.toLowerCase() === 'failed'}
-											<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title="View failed files in review">
+											<Button variant="outline" size="sm" class="min-w-[150px]" onclick={() => goto(`/review/${job.id}?tab=failed`)} title={$t('jobs.viewBtn')}>
 												<Eye class="h-4 w-4 mr-1" />
-												{job.completed > 0 ? 'Review' : 'View Failed'}
+												{job.completed > 0 ? $t('jobs.reviewBtn') : $t('jobs.viewFailed')}
 											</Button>
-											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title={$t('jobs.dismiss')}>
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{:else}
-											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title="Dismiss">
+											<Button variant="ghost" size="sm" onclick={() => dismissJobMutation.mutate(job.id)} disabled={dismissJobMutation.isPending} title={$t('jobs.dismiss')}>
 												<Trash2 class="h-4 w-4 text-muted-foreground" />
 											</Button>
 										{/if}

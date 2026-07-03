@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import { flip } from 'svelte/animate';
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
@@ -112,8 +114,8 @@
 			cwdQuery.error
 		].filter(Boolean);
 		if (errors.length === 0) return null;
-		if (errors.length === 6) return 'Unable to load dashboard data.';
-		return `Loaded with ${errors.length} partial error${errors.length > 1 ? 's' : ''}.`;
+		if (errors.length === 6) return get(t)('dashboard.error.loadFailed');
+		return get(t)('dashboard.error.partialErrors', { values: { count: errors.length } });
 	});
 
 	$effect(() => {
@@ -268,13 +270,7 @@
 	}
 
 	function operationLabel(operation: string): string {
-		const labels: Record<string, string> = {
-			scrape: 'Scrape',
-			organize: 'Organize',
-			download: 'Download',
-			nfo: 'NFO'
-		};
-		return labels[operation] || operation;
+		return get(t)(`operation.${operation}`) || operation;
 	}
 
 	function statusBadgeClass(status: string): string {
@@ -299,34 +295,34 @@
 	function getHealthChecks() {
 		return [
 			{
-				label: 'API Connectivity',
+				label: 'dashboard.health.apiConnectivity',
 				ok: health?.status === 'ok',
-				hint: health?.status === 'ok' ? 'Backend reachable' : 'Cannot reach API',
-				actionLabel: 'Retry',
+				hint: health?.status === 'ok' ? 'dashboard.health.apiReachable' : 'dashboard.health.apiUnreachable',
+				actionLabel: 'common.refresh',
 				action: refreshDashboard
 			},
 			{
-				label: 'WebSocket Stream',
+				label: 'dashboard.health.webSocket',
 				ok: wsState.connected,
-				hint: wsState.connected ? 'Real-time updates enabled' : 'No live progress feed',
-				actionLabel: 'Browse Jobs',
+				hint: wsState.connected ? 'dashboard.health.wsEnabled' : 'dashboard.health.wsDisabled',
+				actionLabel: 'dashboard.goToBrowse',
 				action: () => goto('/browse')
 			},
 			{
-				label: 'Scrapers Configured',
+				label: 'dashboard.health.scrapersConfigured',
 				ok: (health?.scrapers?.length ?? 0) > 0,
 				hint:
 					(health?.scrapers?.length ?? 0) > 0
-						? `${health?.scrapers.length ?? 0} scraper(s) available`
-						: 'No scraper reported by API',
-				actionLabel: 'Open Settings',
+						? 'dashboard.health.scrapersAvailable'
+						: 'dashboard.health.noScrapers',
+				actionLabel: 'dashboard.settings',
 				action: () => goto('/settings')
 			},
 			{
-				label: 'Output Path',
+				label: 'dashboard.health.outputPath',
 				ok: outputPath.trim().length > 0,
-				hint: outputPath.trim().length > 0 ? 'Destination path is saved' : 'Set an output path',
-				actionLabel: 'Set in Browse',
+				hint: outputPath.trim().length > 0 ? 'dashboard.health.outputPathSaved' : 'dashboard.health.setOutputPath',
+				actionLabel: 'dashboard.health.setInBrowse',
 				action: () => goto('/browse')
 			}
 		];
@@ -354,28 +350,28 @@
 					<div class="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-2xl"></div>
 					<div class="relative space-y-4">
 						<div>
-							<p class="text-sm font-medium text-primary">Dashboard</p>
-							<h1 class="text-4xl font-bold tracking-tight">Javinizer Control Center</h1>
+							<p class="text-sm font-medium text-primary">{$t('dashboard.label')}</p>
+							<h1 class="text-4xl font-bold tracking-tight">{$t('dashboard.title')}</h1>
 							<p class="text-muted-foreground mt-2 max-w-2xl">
-								Run scraping workflows, monitor system health, and jump back into recent jobs.
+								{$t('dashboard.subtitle')}
 							</p>
 						</div>
 						<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
 							<Button onclick={() => goto('/browse')}>
 								<FolderOpen class="h-4 w-4" />
-								Start Scrape
+								{$t('dashboard.startScrape')}
 							</Button>
 							<Button variant="outline" onclick={() => goto('/history')}>
 								<History class="h-4 w-4" />
-								Recent History
+								{$t('dashboard.recentHistory')}
 							</Button>
 							<Button variant="outline" onclick={() => goto('/actresses')}>
 								<Users class="h-4 w-4" />
-								Manage Actresses
+								{$t('dashboard.manageActresses')}
 							</Button>
 							<Button variant="outline" onclick={() => goto('/settings')}>
 								<Settings class="h-4 w-4" />
-								Settings
+								{$t('dashboard.settings')}
 							</Button>
 						</div>
 					</div>
@@ -385,8 +381,8 @@
 			<div in:fly|local={{ y: -8, duration: 260, easing: quintOut }}>
 				<Card class="p-5 h-full">
 					<div class="flex items-center justify-between mb-3">
-						<h2 class="text-lg font-semibold">Current Activity</h2>
-						<Button variant="ghost" size="sm" onclick={refreshDashboard} title="Refresh dashboard">
+						<h2 class="text-lg font-semibold">{$t('dashboard.currentActivity')}</h2>
+						<Button variant="ghost" size="sm" onclick={refreshDashboard} title={$t('dashboard.refreshDashboard')}>
 							<RefreshCw class="h-4 w-4 {refreshing ? 'animate-spin' : ''}" />
 						</Button>
 					</div>
@@ -402,31 +398,31 @@
 								<div class="h-full bg-primary transition-all duration-300" style="width: {latestActivityProgressPercent}%"></div>
 							</div>
 							<div class="flex items-center justify-between text-xs text-muted-foreground">
-								<span>Status: {latestActivity.status}</span>
+								<span>{$t('dashboard.status.label')} {latestActivity.status}</span>
 								<span>{latestActivityProgressPercent.toFixed(0)}%</span>
 							</div>
 							<div class="flex gap-2 pt-1">
 <Button size="sm" variant="outline" onclick={() => goto('/jobs')}>
-								Open Jobs
+								{$t('dashboard.openJobs')}
 							</Button>
 								<Button size="sm" variant="outline" onclick={() => goto('/history')}>
-									View History
+									{$t('dashboard.viewHistory')}
 								</Button>
 							</div>
 						</div>
 					{:else}
 						<div class="text-sm text-muted-foreground space-y-2">
-							<p>No recent job activity yet.</p>
+							<p>{$t('dashboard.noActivity')}</p>
 							<Button size="sm" onclick={() => goto('/browse')}>
 								<ArrowRight class="h-4 w-4" />
-								Go to Browse
+								{$t('dashboard.goToBrowse')}
 							</Button>
 						</div>
 					{/if}
 
 					<div class="mt-4 pt-4 border-t text-xs text-muted-foreground flex items-center justify-between">
-						<span>Active jobs: {activeJobCount}</span>
-						<span>{wsState.connected ? 'WS connected' : 'WS disconnected'}</span>
+						<span>{$t('dashboard.activeJobs')} {activeJobCount}</span>
+						<span>{wsState.connected ? $t('dashboard.wsConnected') : $t('dashboard.wsDisconnected')}</span>
 					</div>
 				</Card>
 			</div>
@@ -447,25 +443,25 @@
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
 			<div in:fly|local={{ y: 8, duration: 200, easing: quintOut }}>
 				<Card class="p-4">
-					<p class="text-sm text-muted-foreground">Total Operations</p>
+					<p class="text-sm text-muted-foreground">{$t('dashboard.totalOperations')}</p>
 					<p class="text-3xl font-bold mt-1">{stats?.total ?? '-'}</p>
 				</Card>
 			</div>
 			<div in:fly|local={{ y: 8, duration: 220, easing: quintOut }}>
 				<Card class="p-4">
-					<p class="text-sm text-muted-foreground">Success Rate (7d)</p>
+					<p class="text-sm text-muted-foreground">{$t('dashboard.successRate7d')}</p>
 					<p class="text-3xl font-bold mt-1 text-green-600">{sevenDayMetrics.successRate}%</p>
 				</Card>
 			</div>
 			<div in:fly|local={{ y: 8, duration: 240, easing: quintOut }}>
 				<Card class="p-4">
-					<p class="text-sm text-muted-foreground">Failures (7d)</p>
+					<p class="text-sm text-muted-foreground">{$t('dashboard.failures7d')}</p>
 					<p class="text-3xl font-bold mt-1 text-red-600">{sevenDayMetrics.failed}</p>
 				</Card>
 			</div>
 			<div in:fly|local={{ y: 8, duration: 260, easing: quintOut }}>
 				<Card class="p-4">
-					<p class="text-sm text-muted-foreground">Actresses in DB</p>
+					<p class="text-sm text-muted-foreground">{$t('dashboard.actressesInDb')}</p>
 					<p class="text-3xl font-bold mt-1">{actressTotal ?? '-'}</p>
 				</Card>
 			</div>
@@ -476,14 +472,14 @@
 			<div class="lg:col-span-2" in:scale|local={{ start: 0.98, duration: 200, easing: quintOut }}>
 				<Card class="p-5">
 					<div class="flex items-center justify-between mb-3">
-						<h2 class="text-xl font-semibold">Recent Runs</h2>
-						<div class="text-sm text-muted-foreground">{recentRunCount} recent record(s)</div>
+						<h2 class="text-xl font-semibold">{$t('dashboard.recentRuns')}</h2>
+						<div class="text-sm text-muted-foreground">{$t('dashboard.recentRecords', { values: { count: recentRunCount } })}</div>
 					</div>
 
 					{#if loading}
-						<div class="text-sm text-muted-foreground py-10 text-center">Loading recent runs...</div>
+						<div class="text-sm text-muted-foreground py-10 text-center">{$t('dashboard.loadingRecentRuns')}</div>
 					{:else if recentRuns.length === 0}
-						<div class="text-sm text-muted-foreground py-10 text-center">No operations recorded yet.</div>
+						<div class="text-sm text-muted-foreground py-10 text-center">{$t('dashboard.noOperations')}</div>
 					{:else}
 						{#key recentRenderKey}
 							<div class="space-y-2" in:fade|local={{ duration: 150 }}>
@@ -513,7 +509,7 @@
 					<div class="pt-3 mt-3 border-t flex justify-end">
 						<Button variant="outline" onclick={() => goto('/history')}>
 							<History class="h-4 w-4" />
-							Open Full History
+							{$t('dashboard.openFullHistory')}
 						</Button>
 					</div>
 				</Card>
@@ -521,7 +517,7 @@
 
 			<div class="space-y-4" in:fade|local={{ duration: 200 }}>
 				<Card class="p-5">
-					<h2 class="text-lg font-semibold mb-3">Setup Health</h2>
+					<h2 class="text-lg font-semibold mb-3">{$t('dashboard.setupHealth')}</h2>
 					<div class="space-y-3">
 						{#each getHealthChecks() as check}
 							<div class="rounded-md border p-3">
@@ -533,12 +529,12 @@
 											{:else}
 												<CircleX class="h-4 w-4 text-red-600" />
 											{/if}
-											<p class="font-medium text-sm">{check.label}</p>
+											<p class="font-medium text-sm">{$t(check.label)}</p>
 										</div>
-										<p class="text-xs text-muted-foreground mt-1">{check.hint}</p>
+										<p class="text-xs text-muted-foreground mt-1">{$t(check.hint, { values: { count: health?.scrapers?.length ?? 0 } })}</p>
 									</div>
 									{#if !check.ok}
-										<Button size="sm" variant="outline" onclick={check.action}>{check.actionLabel}</Button>
+										<Button size="sm" variant="outline" onclick={check.action}>{$t(check.actionLabel)}</Button>
 									{/if}
 								</div>
 							</div>
@@ -547,18 +543,18 @@
 				</Card>
 
 				<Card class="p-5">
-					<h2 class="text-lg font-semibold mb-3">Path Shortcuts</h2>
+					<h2 class="text-lg font-semibold mb-3">{$t('dashboard.pathShortcuts')}</h2>
 					<div class="space-y-2 text-sm">
 						<div class="rounded-md border p-2">
-							<p class="text-xs text-muted-foreground">Working Directory</p>
+							<p class="text-xs text-muted-foreground">{$t('dashboard.workingDirectory')}</p>
 							<p class="font-medium" title={currentWorkingDirectory}>{truncateMiddle(currentWorkingDirectory)}</p>
 						</div>
 						<div class="rounded-md border p-2">
-							<p class="text-xs text-muted-foreground">Input Path</p>
+							<p class="text-xs text-muted-foreground">{$t('dashboard.inputPath')}</p>
 							<p class="font-medium" title={inputPath}>{truncateMiddle(inputPath)}</p>
 						</div>
 						<div class="rounded-md border p-2">
-							<p class="text-xs text-muted-foreground">Output Path</p>
+							<p class="text-xs text-muted-foreground">{$t('dashboard.outputPath')}</p>
 							<p class="font-medium" title={outputPath}>{truncateMiddle(outputPath)}</p>
 						</div>
 					</div>

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { CompletenessTier } from '$lib/utils/completeness';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		score: number;
@@ -23,7 +24,7 @@
 	const dashOffset = $derived(circumference * (1 - score / 100));
 </script>
 
-<div class="flex-shrink-0" style="width: {size}px; height: {size}px;" role="img" aria-label={`${score}% complete`} aria-describedby={ariaDescribedby}>
+<div class="flex-shrink-0" style="width: {size}px; height: {size}px;" role="img" aria-label={$t('completenessDial.ariaLabel', { values: { percent: score } })} aria-describedby={ariaDescribedby}>
 	<svg viewBox="0 0 36 36" width={size} height={size}>
 		<circle
 			cx="18"

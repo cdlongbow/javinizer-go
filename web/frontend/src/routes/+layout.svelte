@@ -14,6 +14,8 @@
 	import { getBackgroundJobState, reopenModal, dismiss, closeModal } from '$lib/stores/background-job.svelte';
 	import { getQueryClient } from '$lib/query/client';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
+	import { initI18n, getInitialLocale, setLocale } from '$lib/i18n/setup';
+	import { locale } from 'svelte-i18n';
 	import '../app.css';
 
 	let { children } = $props();
@@ -127,6 +129,7 @@
 	}
 
 	onMount(() => {
+		initI18n();
 		getThemeStore().initTheme();
 		refreshAuthStatus();
 	});

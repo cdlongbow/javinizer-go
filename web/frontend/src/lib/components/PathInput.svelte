@@ -3,6 +3,8 @@
 	import type { PathAutocompleteSuggestion } from '$lib/api/types';
 	import { Folder, ArrowRight, LoaderCircle } from 'lucide-svelte';
 	import Button from './ui/Button.svelte';
+	import { t } from '$lib/i18n/setup';
+	import { get } from 'svelte/store';
 
 	interface Props {
 		value?: string;
@@ -20,7 +22,7 @@
 	let {
 		value = $bindable(''),
 		onchange,
-		placeholder = 'Enter path (e.g., /path/to/videos)',
+		placeholder = get(t)('pathInput.placeholder'),
 		whitelistPaths = [],
 		showNavigateButton = false,
 		onnavigate,
@@ -200,7 +202,7 @@
 </div>
 
 {#if showNavigateButton}
-	<Button variant="outline" size="sm" onclick={() => onnavigate?.(value.trim())} disabled={!value.trim() || navigateDisabled || loading} title="Navigate to path">
+	<Button variant="outline" size="sm" onclick={() => onnavigate?.(value.trim())} disabled={!value.trim() || navigateDisabled || loading} title={$t('fileBrowser.goToRoot')}>
 		{#snippet children()}
 			<ArrowRight class="h-4 w-4" />
 		{/snippet}

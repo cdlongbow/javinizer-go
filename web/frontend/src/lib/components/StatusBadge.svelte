@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { CheckCircle2, CircleX, Undo2, LoaderCircle, AlertTriangle } from 'lucide-svelte';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		status: 'success' | 'failed' | 'reverted' | 'running' | 'organized' | 'cancelled' | 'partially-reverted';
@@ -17,56 +18,56 @@
 					icon: CheckCircle2,
 					bgClass: 'bg-green-500/10 dark:bg-green-500/10',
 					textClass: 'text-green-500 dark:text-green-400',
-					label: 'Success'
+					labelKey: 'success'
 				};
 			case 'organized':
 				return {
 					icon: CheckCircle2,
 					bgClass: 'bg-purple-500/10 dark:bg-purple-500/10',
 					textClass: 'text-purple-500 dark:text-purple-400',
-					label: 'Organized'
+					labelKey: 'organized'
 				};
 			case 'failed':
 				return {
 					icon: CircleX,
 					bgClass: 'bg-red-500/10 dark:bg-red-500/10',
 					textClass: 'text-red-500 dark:text-red-400',
-					label: 'Failed'
+					labelKey: 'failed'
 				};
 			case 'reverted':
 				return {
 					icon: Undo2,
 					bgClass: 'bg-yellow-500/10 dark:bg-yellow-500/10',
 					textClass: 'text-yellow-500 dark:text-yellow-400',
-					label: 'Reverted'
+					labelKey: 'reverted'
 				};
 			case 'running':
 				return {
 					icon: LoaderCircle,
 					bgClass: 'bg-blue-500/10 dark:bg-blue-500/10',
 					textClass: 'text-blue-500 dark:text-blue-400',
-					label: 'Running'
+					labelKey: 'running'
 				};
 			case 'cancelled':
 				return {
 					icon: CircleX,
 					bgClass: 'bg-gray-500/10 dark:bg-gray-500/10',
 					textClass: 'text-gray-400 dark:text-gray-400',
-					label: 'Cancelled'
+					labelKey: 'cancelled'
 				};
 			case 'partially-reverted':
 				return {
 					icon: AlertTriangle,
 					bgClass: 'bg-orange-500/10 dark:bg-orange-500/10',
 					textClass: 'text-orange-500 dark:text-orange-400',
-					label: 'Partial'
+					labelKey: 'partial'
 				};
 			default:
 				return {
 					icon: CircleX,
 					bgClass: 'bg-gray-500/10 dark:bg-gray-500/10',
 					textClass: 'text-gray-400 dark:text-gray-400',
-					label: status
+					labelKey: status
 				};
 		}
 	});
@@ -74,12 +75,12 @@
 
 <span
 	class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded {sizeClass} font-medium {config.bgClass} {config.textClass}"
-	aria-label="{config.label}"
+	aria-label={$t('status.' + config.labelKey)}
 >
 	{#if status === 'running'}
 		<config.icon class="h-3 w-3 animate-spin" />
 	{:else}
 		<config.icon class="h-3 w-3" />
 	{/if}
-	{config.label}
+	{$t('status.' + config.labelKey)}
 </span>

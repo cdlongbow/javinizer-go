@@ -3,10 +3,11 @@
 	import { browser } from '$app/environment';
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
-	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown, Sun, Moon, Monitor, Tags, Type } from 'lucide-svelte';
+	import { FolderOpen, Settings, Film, Users, LogOut, Activity, FileText, ChevronDown, Sun, Moon, Monitor, Tags, Type, Languages } from 'lucide-svelte';
 	import { getThemeStore } from '$lib/stores/theme.svelte';
 	import type { Theme } from '$lib/stores/theme.svelte';
 	import UpdateIndicator from '$lib/components/UpdateIndicator.svelte';
+	import { t, setLocale, locale } from '$lib/i18n/setup';
 
 	interface Props {
 		authenticated?: boolean;
@@ -19,16 +20,16 @@
 	const themeStore = getThemeStore();
 
 	const navItems = [
-		{ href: '/browse', label: 'Scrape', icon: FolderOpen },
-		{ href: '/jobs', label: 'Jobs', icon: Activity },
-		{ href: '/actresses', label: 'Actresses', icon: Users },
-		{ href: '/genres', label: 'Genres', icon: Tags },
-		{ href: '/words', label: 'Words', icon: Type }
+		{ href: '/browse', label: 'navigation.scrape', icon: FolderOpen },
+		{ href: '/jobs', label: 'navigation.jobs', icon: Activity },
+		{ href: '/actresses', label: 'navigation.actresses', icon: Users },
+		{ href: '/genres', label: 'navigation.genres', icon: Tags },
+		{ href: '/words', label: 'navigation.words', icon: Type }
 	];
 
 	const subMenuItems = [
-		{ href: '/logs', label: 'Logs', icon: FileText },
-		{ href: '/settings', label: 'Settings', icon: Settings }
+		{ href: '/logs', label: 'navigation.logs', icon: FileText },
+		{ href: '/settings', label: 'navigation.settings', icon: Settings }
 	];
 
 	let subMenuOpen = $state(false);
@@ -43,8 +44,8 @@
 		themeStore.current === 'dark' ? Moon : themeStore.current === 'light' ? Sun : Monitor
 	);
 
-	const themeLabel = $derived(
-		themeStore.current === 'dark' ? 'Dark' : themeStore.current === 'light' ? 'Light' : 'System'
+	const themeLabelKey = $derived(
+		themeStore.current === 'dark' ? 'navigation.theme.dark' : themeStore.current === 'light' ? 'navigation.theme.light' : 'navigation.theme.system'
 	);
 
 	function toggleSubMenu() {
@@ -78,7 +79,7 @@
 			<!-- Logo -->
 			<a href="/" class="flex items-center gap-2 font-bold text-xl transition-opacity duration-200 hover:opacity-80">
 				<Film class="h-6 w-6 text-primary" />
-				<span>Javinizer</span>
+				<span>{$t('navigation.brand')}</span>
 			</a>
 
 			<!-- Nav Links -->
@@ -93,7 +94,7 @@
 							: 'hover:bg-accent hover:-translate-y-px'}"
 					>
 						<Icon class="h-4 w-4" />
-						<span class="hidden md:inline">{item.label}</span>
+						<span class="hidden md:inline">{$t(item.label)}</span>
 					</a>
 				{/each}
 
@@ -135,7 +136,16 @@
 								class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all duration-150 hover:bg-accent hover:translate-x-0.5 w-full"
 							>
 								<ThemeIcon class="h-4 w-4" />
-								<span>{themeLabel}</span>
+								<span>{$t(themeLabelKey)}</span>
+							</button>
+
+							<button
+								type="button"
+								onclick={() => setLocale($locale === 'en' ? 'zh' : 'en')}
+								class="flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-all duration-150 hover:bg-accent hover:translate-x-0.5 w-full"
+							>
+								<Languages class="h-4 w-4" />
+								<span>{$t('language.' + $locale)}</span>
 							</button>
 
 							<div class="my-1 border-t"></div>
@@ -151,7 +161,7 @@
 										: 'hover:bg-accent hover:translate-x-0.5'}"
 								>
 									<Icon class="h-4 w-4" />
-									{item.label}
+									{$t(item.label)}
 								</a>
 							{/each}
 						</div>
@@ -163,10 +173,10 @@
 						type="button"
 						class="flex items-center gap-2 px-4 py-2 rounded-md transition-all duration-200 hover:bg-accent hover:-translate-y-px hover:text-destructive"
 						onclick={() => onLogout?.()}
-						title="Logout"
+						title={$t('navigation.logout')}
 					>
 						<LogOut class="h-4 w-4" />
-						<span class="hidden md:inline">{username ? `${username} · Logout` : 'Logout'}</span>
+						<span class="hidden md:inline">{#if username}{username} · {/if}{$t('navigation.logout')}</span>
 					</button>
 				{/if}
 			</div>

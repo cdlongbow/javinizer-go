@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/setup';
+	import { get } from 'svelte/store';
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
 	import { Save, RefreshCw, CircleAlert, ArrowLeft, X, Tags, Type } from 'lucide-svelte';
@@ -85,9 +87,9 @@
 					</Button>
 				</a>
 				<div class="flex-1">
-					<h1 class="text-3xl font-bold">Settings</h1>
+					<h1 class="text-3xl font-bold">{$t('settings.title')}</h1>
 					<p class="text-muted-foreground mt-1">
-						Configure Javinizer scraping and output options
+						{$t('settings.description')}
 					</p>
 				</div>
 			</div>
@@ -95,13 +97,13 @@
 				<Button variant="outline" onclick={settings.reloadConfig} disabled={settings.loading || settings.reloading}>
 					{#snippet children()}
 						<RefreshCw class="h-4 w-4 mr-2 {settings.reloading ? 'animate-spin' : ''}" />
-						Reload
+						{$t('settings.reload')}
 					{/snippet}
 				</Button>
 				<Button onclick={settings.handleSave} disabled={settings.saveConfigMutation.isPending || settings.loading}>
 					{#snippet children()}
 						<Save class="h-4 w-4 mr-2" />
-						{settings.saveConfigMutation.isPending ? 'Saving...' : 'Save Changes'}
+						{settings.saveConfigMutation.isPending ? $t('settings.saving') : $t('settings.saveChanges')}
 					{/snippet}
 				</Button>
 			</div>
@@ -117,15 +119,15 @@
 		{#if settings.loading}
 			<Card class="p-8 text-center">
 				<RefreshCw class="h-8 w-8 animate-spin mx-auto mb-2" />
-				<p class="text-muted-foreground">Loading configuration...</p>
+				<p class="text-muted-foreground">{$t('settings.loading')}</p>
 			</Card>
 		{:else if settings.settingsConfig}
 			<ServerSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 
-			<SettingsSection title="Scraper Defaults" description="Default settings applied to all scrapers unless overridden per-scraper" defaultExpanded={false}>
+			<SettingsSection title={$t('settings.scraperDefaults.title')} description={$t('settings.scraperDefaults.description')} defaultExpanded={false}>
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 					<div>
-						<label class="block text-sm font-medium mb-2" for="scrapers-user-agent">Default User-Agent</label>
+						<label class="block text-sm font-medium mb-2" for="scrapers-user-agent">{$t('settings.scraperDefaults.userAgent')}</label>
 						<input
 							id="scrapers-user-agent"
 							type="text"
@@ -134,10 +136,10 @@
 							class={settings.inputClass}
 							placeholder="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 						/>
-						<p class="text-xs text-muted-foreground mt-1">Custom User-Agent for scraper requests (default browser UA if empty)</p>
+						<p class="text-xs text-muted-foreground mt-1">{$t('settings.scraperDefaults.userAgentHint')}</p>
 					</div>
 					<div>
-						<label class="block text-sm font-medium mb-2" for="scrapers-referer">Default Referer</label>
+						<label class="block text-sm font-medium mb-2" for="scrapers-referer">{$t('settings.scraperDefaults.referer')}</label>
 						<input
 							id="scrapers-referer"
 							type="text"
@@ -146,15 +148,15 @@
 							class={settings.inputClass}
 							placeholder="https://www.dmm.co.jp/"
 						/>
-					<p class="text-xs text-muted-foreground mt-1">Referer header for CDN compatibility (default: https://www.dmm.co.jp/)</p>
+					<p class="text-xs text-muted-foreground mt-1">{$t('settings.scraperDefaults.refererHint')}</p>
 				</div>
 			</div>
 
 			<div class="pt-4 border-t mt-4">
 				<FormToggle
 					id="global-scrape-actress"
-					label="Scrape Actress Information (Global Default)"
-					description="Default setting for actress scraping across all scrapers. Individual scrapers can override this in their settings."
+					label={$t('settings.scraperDefaults.scrapeActress')}
+					description={$t('settings.scraperDefaults.scrapeActressDesc')}
 					checked={settings.config?.scrapers?.scrape_actress ?? true}
 					onchange={(val) => {
 						if (!settings.config) return;
@@ -201,7 +203,7 @@
 				parseOptionNumber={scraper.parseOptionNumber}
 			/>
 
-			<SettingsSection title="Metadata Priority" description="Configure which scraper to use for each metadata field" defaultExpanded={false}>
+			<SettingsSection title={$t('settings.metadataPriority.title')} description={$t('settings.metadataPriority.description')} defaultExpanded={false}>
 				<MetadataPriority config={settings.settingsConfig} onUpdate={(updatedConfig) => { settings.config = updatedConfig; }} />
 			</SettingsSection>
 
@@ -211,11 +213,11 @@
 			<OutputSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 			<DatabaseSettingsSection config={settings.settingsConfig} inputClass={settings.inputClass} />
 			<ApiTokensSection onTokenDisplay={handleTokenDisplay} />
-			<SettingsSection title="Genre Replacements" description="Manage genre name replacements applied during scraping" defaultExpanded={false}>
+			<SettingsSection title={$t('settings.genreReplacements.title')} description={$t('settings.genreReplacements.description')} defaultExpanded={false}>
 				<div class="space-y-4">
 					<FormToggle
-						label="Enable genre replacement"
-						description="Normalize genre names using exact-match mappings from the database"
+						label={$t('settings.genreReplacements.enable')}
+						description={$t('settings.genreReplacements.enableDesc')}
 						checked={settings.settingsConfig.metadata.genre_replacement?.enabled ?? false}
 						onchange={(val) => {
 							const cfg = settings.settingsConfig;
@@ -225,8 +227,8 @@
 						}}
 					/>
 					<FormToggle
-						label="Auto-add genres"
-						description="Automatically add new genre replacements to the database with identity mapping"
+						label={$t('settings.genreReplacements.autoAdd')}
+						description={$t('settings.genreReplacements.autoAddDesc')}
 						checked={settings.settingsConfig.metadata.genre_replacement?.auto_add ?? false}
 						onchange={(val) => {
 							const cfg = settings.settingsConfig;
@@ -237,13 +239,13 @@
 					/>
 					<div class="flex items-center justify-between pt-2 border-t border-border">
 						<p class="text-sm text-muted-foreground">
-							Manage individual genre replacement rules.
+						{$t('settings.genreReplacements.manage')}
 						</p>
 						<a href="/genres">
 							<Button variant="outline" size="sm">
 								{#snippet children()}
 									<Tags class="h-4 w-4 mr-1" />
-									Manage Genres
+									{$t('settings.genreReplacements.manageBtn')}
 								{/snippet}
 							</Button>
 						</a>
@@ -251,11 +253,11 @@
 				</div>
 			</SettingsSection>
 
-			<SettingsSection title="Word Replacements" description="Manage word uncensor rules applied during scraping" defaultExpanded={false}>
+			<SettingsSection title={$t('settings.wordReplacements.title')} description={$t('settings.wordReplacements.description')} defaultExpanded={false}>
 				<div class="space-y-4">
 					<FormToggle
-						label="Enable word replacement"
-						description="De-censor and replace words in all text fields (title, description, genres, etc.) using database mappings. Default censored-to-clean pairs (e.g. S******n -> Shotacon) are seeded on startup."
+						label={$t('settings.wordReplacements.enable')}
+						description={$t('settings.wordReplacements.enableDesc')}
 						checked={settings.settingsConfig.metadata.word_replacement?.enabled ?? false}
 						onchange={(val) => {
 							const cfg = settings.settingsConfig;
@@ -266,13 +268,13 @@
 					/>
 					<div class="flex items-center justify-between pt-2 border-t border-border">
 						<p class="text-sm text-muted-foreground">
-							Manage individual word replacement rules.
+{$t('settings.wordReplacements.manage')}
 						</p>
 						<a href="/words">
 							<Button variant="outline" size="sm">
 								{#snippet children()}
 									<Type class="h-4 w-4 mr-1" />
-									Manage Words
+									{$t('settings.wordReplacements.manageBtn')}
 								{/snippet}
 							</Button>
 						</a>

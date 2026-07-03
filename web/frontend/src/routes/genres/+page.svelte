@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/setup';
+	import { get } from 'svelte/store';
 	import { cubicOut } from 'svelte/easing';
 	import { fade, fly } from 'svelte/transition';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
@@ -226,10 +228,10 @@
 				<div>
 					<div class="flex items-center gap-2">
 						<Tags class="h-6 w-6 text-primary" />
-						<h1 class="text-3xl font-bold">Genre Replacements</h1>
+						<h1 class="text-3xl font-bold">{$t('genres.title')}</h1>
 					</div>
 					<p class="text-muted-foreground mt-1">
-						Manage genre name replacements applied during scraping
+						{$t('genres.description')}
 					</p>
 				</div>
 			</div>
@@ -252,7 +254,7 @@
 					{:else}
 						<Download class="h-4 w-4 mr-1" />
 					{/if}
-					Export
+					{$t('genres.export')}
 				</Button>
 				<Button
 					variant="outline"
@@ -265,7 +267,7 @@
 					{:else}
 						<Upload class="h-4 w-4 mr-1" />
 					{/if}
-					Import
+					{$t('genres.import')}
 				</Button>
 			</div>
 		</div>
@@ -279,26 +281,26 @@
 		{:else}
 			<div in:fly|local={{ y: 8, duration: 180, delay: 60 }}>
 				<Card class="p-5">
-					<p class="text-sm font-medium mb-3">Add a new genre replacement rule</p>
+					<p class="text-sm font-medium mb-3">{$t('genres.addTitle')}</p>
 					<div class="flex flex-col sm:flex-row items-start gap-3">
 						<div class="flex-1 w-full sm:w-auto">
-							<label for="genre-original" class="block text-xs font-medium text-muted-foreground mb-1">Original</label>
+							<label for="genre-original" class="block text-xs font-medium text-muted-foreground mb-1">{$t('genres.originalHeader')}</label>
 							<input
 								id="genre-original"
 								type="text"
 								bind:value={newOriginal}
-								placeholder="e.g., HD"
+								placeholder={$t('genres.originalPlaceholder')}
 								onkeydown={handleAddKeydown}
 								class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
 						</div>
 						<div class="flex-1 w-full sm:w-auto">
-							<label for="genre-replacement" class="block text-xs font-medium text-muted-foreground mb-1">Replacement</label>
+							<label for="genre-replacement" class="block text-xs font-medium text-muted-foreground mb-1">{$t('genres.replacementHeader')}</label>
 							<input
 								id="genre-replacement"
 								type="text"
 								bind:value={newReplacement}
-								placeholder="e.g., High Definition"
+								placeholder={$t('genres.replacementPlaceholder')}
 								onkeydown={handleAddKeydown}
 								class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
@@ -315,7 +317,7 @@
 								{:else}
 									<Plus class="h-4 w-4 mr-1" />
 								{/if}
-								Add
+								{$t('genres.addBtn')}
 							</Button>
 						</div>
 					</div>
@@ -326,11 +328,11 @@
 				{#if loading}
 					<Card class="p-8 text-center text-muted-foreground">
 						<Loader2 class="h-5 w-5 animate-spin mx-auto mb-2" />
-						Loading genre replacements...
+						{$t('genres.loading')}
 					</Card>
 				{:else if replacements.length === 0}
 					<Card class="p-8 text-center">
-						<p class="text-muted-foreground">No genre replacements configured yet. Add one above.</p>
+						<p class="text-muted-foreground">{$t('genres.noReplacements')}</p>
 					</Card>
 				{:else}
 					<div class="flex flex-col sm:flex-row items-start sm:items-center gap-3 mb-3">
@@ -339,7 +341,7 @@
 							<input
 								type="text"
 								bind:value={searchQuery}
-								placeholder="Search by original or replacement..."
+								placeholder={$t('genres.searchPlaceholder')}
 								class="w-full pl-9 pr-8 rounded-md border border-input bg-background py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 							/>
 							{#if searchQuery}
@@ -347,7 +349,7 @@
 									type="button"
 									class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
 									onclick={clearSearch}
-									title="Clear search"
+									title={$t('genres.clearSearch')}
 								>
 									<X class="h-3.5 w-3.5" />
 								</button>
@@ -357,14 +359,14 @@
 							type="button"
 							class="inline-flex items-center gap-1 px-2.5 py-2 text-sm border border-input rounded-md bg-background hover:bg-accent transition-colors text-muted-foreground hover:text-foreground"
 							onclick={toggleSort}
-							title="Toggle sort order"
+							title={$t('genres.toggleSort')}
 						>
 							{#if sortDirection === 'asc'}
 								<ArrowDownUp class="h-4 w-4" />
 							{:else}
 								<ChevronsDownUp class="h-4 w-4" />
 							{/if}
-							<span class="text-xs">{sortDirection === 'asc' ? 'A-Z' : 'Z-A'}</span>
+							<span class="text-xs">{sortDirection === 'asc' ? $t('genres.sortAsc') : $t('genres.sortDesc')}</span>
 						</button>
 					</div>
 
@@ -372,15 +374,15 @@
 						<div class="relative" style="max-height: 560px; overflow-y: auto;">
 							<div class="sticky top-0 z-10">
 								<div class="grid grid-cols-[1fr_1fr_auto] gap-0 text-sm py-3 px-4 font-medium text-muted-foreground border-b border-border bg-card/95 backdrop-blur">
-									<div>Original</div>
-									<div>Replacement</div>
-									<div class="w-20 text-center">Actions</div>
+									<div>{$t('genres.originalHeader')}</div>
+									<div>{$t('genres.replacementHeader')}</div>
+									<div class="w-20 text-center">{$t('genres.actions')}</div>
 								</div>
 							</div>
 							<div class="min-h-0">
 								{#if filteredAndSorted.length === 0 && searchQuery.trim()}
 									<div class="py-12 text-center text-muted-foreground text-sm">
-										No replacements match "{searchQuery}"
+									{$t('genres.noSearchResults', { values: { query: searchQuery } })}
 									</div>
 								{:else}
 									{#each filteredAndSorted as rep (rep.id)}
@@ -413,7 +415,7 @@
 															{:else}
 																<Check class="h-3 w-3" />
 															{/if}
-															Save
+															{$t('genres.save')}
 														</button>
 														<button
 															type="button"
@@ -421,7 +423,7 @@
 															onclick={cancelEdit}
 														>
 															<X class="h-3 w-3" />
-															Cancel
+															{$t('genres.cancel')}
 														</button>
 													</div>
 												</div>
@@ -437,7 +439,7 @@
 													<button
 														type="button"
 														class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-														title="Edit"
+														title={$t('genres.edit')}
 														onclick={() => startEdit(rep)}
 													>
 														<Pencil class="h-4 w-4" />
@@ -445,7 +447,7 @@
 													<button
 														type="button"
 														class="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-														title="Delete"
+														title={$t('genres.delete')}
 																				onclick={() => handleDelete(rep.id)}
 													>
 														<Trash2 class="h-4 w-4" />
@@ -461,11 +463,11 @@
 
 					{#if searchQuery.trim()}
 						<p class="text-xs text-muted-foreground pt-1">
-							Showing {filteredAndSorted.length} of {replacements.length} replacements
+							{$t('genres.showingFiltered', { values: { visible: filteredAndSorted.length, total: replacements.length } })}
 						</p>
 					{:else}
 						<p class="text-xs text-muted-foreground pt-1">
-							{replacements.length} replacement{replacements.length !== 1 ? 's' : ''} configured
+							{$t('genres.totalConfigured', { values: { count: replacements.length } })}
 						</p>
 					{/if}
 				{/if}
@@ -473,7 +475,7 @@
 
 			<div class="rounded-lg border border-border/60 bg-muted/20 px-4 py-3">
 				<p class="text-xs text-muted-foreground">
-					Replacements take effect on the next scrape. Existing movies are not retroactively updated.
+					{$t('genres.infoNote')}
 				</p>
 			</div>
 		{/if}

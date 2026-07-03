@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/setup';
+	import { get } from 'svelte/store';
 	import { cubicOut, quintOut } from 'svelte/easing';
 	import { fade, fly, scale } from 'svelte/transition';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
@@ -95,8 +97,8 @@
 			in:fly|local={{ y: -10, duration: 240, easing: cubicOut }}
 		>
 			<div>
-				<h1 class="text-3xl font-bold">Actress Database</h1>
-				<p class="text-muted-foreground mt-1">Create, update, and remove actress records stored in the database.</p>
+				<h1 class="text-3xl font-bold">{$t('actresses.title')}</h1>
+				<p class="text-muted-foreground mt-1">{$t('actresses.description')}</p>
 			</div>
 			<div class="flex items-center gap-2">
 				<input
@@ -117,7 +119,7 @@
 					{:else}
 						<Download class="h-4 w-4 mr-1" />
 					{/if}
-					Export
+					{$t('actresses.export')}
 				</Button>
 				<Button
 					variant="outline"
@@ -130,15 +132,15 @@
 					{:else}
 						<Upload class="h-4 w-4 mr-1" />
 					{/if}
-					Import
+					{$t('actresses.import')}
 				</Button>
 				<Button variant="outline" onclick={store.refresh}>
 					<RefreshCw class="h-4 w-4 {store.isRefreshing ? 'animate-spin' : ''}" />
-					Refresh
+					{$t('actresses.refresh')}
 				</Button>
 				<Button onclick={store.resetForm}>
 					<Plus class="h-4 w-4" />
-					New Actress
+					{$t('actresses.newActress')}
 				</Button>
 			</div>
 		</div>
@@ -184,12 +186,12 @@
 
 				{#if store.loading}
 					<div in:fade|local={{ duration: 180 }}>
-						<Card class="p-8 text-center text-muted-foreground">Loading actresses...</Card>
+						<Card class="p-8 text-center text-muted-foreground">{$t('actresses.loading')}</Card>
 					</div>
 				{:else if store.actresses.length === 0}
 					<div in:fade|local={{ duration: 180 }}>
 						<Card class="p-8 text-center">
-							<p class="text-muted-foreground">No actresses found.</p>
+							<p class="text-muted-foreground">{$t('actresses.noActresses')}</p>
 						</Card>
 					</div>
 				{:else}

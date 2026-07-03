@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/setup';
+	import { get } from 'svelte/store';
 	import { onMount } from 'svelte';
 	import { fade, fly, slide } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
@@ -232,14 +234,14 @@
 	<div class="container mx-auto px-4 py-8 max-w-7xl">
 		<div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
 			<div>
-				<h1 class="text-2xl font-bold tracking-tight">Logs</h1>
-				<p class="text-muted-foreground text-sm mt-1">Structured event stream for debugging</p>
+				<h1 class="text-2xl font-bold tracking-tight">{$t('logs.title')}</h1>
+				<p class="text-muted-foreground text-sm mt-1">{$t('logs.description')}</p>
 			</div>
 			<div class="flex items-center gap-2">
 				{#if hasActiveFilters()}
 					<Button variant="outline" size="sm" onclick={clearAllFilters}>
 						<X class="h-4 w-4 mr-1.5" />
-						Clear
+						{$t('logs.clearFilters')}
 					</Button>
 				{/if}
 				<Button
@@ -252,11 +254,11 @@
 					{:else}
 						<Pause class="h-4 w-4 mr-1.5" />
 					{/if}
-					{isLiveMode ? 'Live' : 'Paused'}
+					{isLiveMode ? $t('logs.live') : $t('logs.paused')}
 				</Button>
 				<Button variant="outline" size="sm" onclick={refreshAll} disabled={isRefreshing}>
 					<RefreshCw class="h-4 w-4 mr-1.5 {isRefreshing ? 'animate-spin' : ''}" />
-					Refresh
+					{$t('logs.refresh')}
 				</Button>
 			</div>
 		</div>
@@ -281,7 +283,7 @@
 								<Search class="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
 								<input
 									type="text"
-									placeholder="Search messages..."
+									placeholder={$t('logs.searchPlaceholder')}
 									bind:value={searchText}
 									class="h-9 w-full pl-9 pr-3 rounded-md border border-input bg-background text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-transparent"
 								/>
@@ -296,7 +298,7 @@
 										size="sm"
 										onclick={() => setSeverityFilter(sev)}
 									>
-										{sev === 'all' ? 'All' : sev.charAt(0).toUpperCase() + sev.slice(1)}
+										{sev === 'all' ? $t('logs.severity.all') : sev.charAt(0).toUpperCase() + sev.slice(1)}
 									</Button>
 								{/each}
 							</div>
@@ -305,7 +307,7 @@
 					<div class="border-t border-border/50"></div>
 
 					<div class="flex items-center gap-3 flex-wrap">
-						<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 w-16 shrink-0">Type</span>
+						<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 w-16 shrink-0">{$t('logs.type.label')}</span>
 						<div class="flex flex-wrap gap-1.5">
 							{#each typeFilters as filter}
 								{@const count = filter.key === 'all' ? (stats?.total ?? 0) : (stats?.by_type[filter.key] ?? 0)}
@@ -327,7 +329,7 @@
 					<div class="flex items-center gap-3 flex-wrap">
 						<span class="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70 w-16 shrink-0">
 							<Calendar class="h-3.5 w-3.5 inline -mt-0.5" />
-							Date
+							{$t('logs.date.label')}
 						</span>
 						<div class="flex items-center gap-2">
 							<input
@@ -353,7 +355,7 @@
 				{#if hasActiveFilters()}
 					<div class="px-4 py-2 border-t border-primary/10 bg-primary/[0.03] flex items-center gap-2 text-xs text-muted-foreground">
 						<Filter class="h-3 w-3" />
-						<span>Showing</span>
+						<span>{$t('logs.showing')}</span>
 						{#if activeTypeFilter !== 'all'}
 							<span class="font-medium text-foreground">{activeTypeFilter}</span>
 						{/if}
@@ -373,7 +375,7 @@
 						{/if}
 						<span>— {hasClientSideFilter() ? `${getDisplayEvents().length} of ${total} loaded` : `${total} result${total !== 1 ? 's' : ''}`}</span>
 						{#if hasClientSideFilter()}
-							<span class="text-muted-foreground/60 italic">(local filter)</span>
+							<span class="text-muted-foreground/60 italic">{$t('logs.localFilter')}</span>
 						{/if}
 					</div>
 				{/if}
