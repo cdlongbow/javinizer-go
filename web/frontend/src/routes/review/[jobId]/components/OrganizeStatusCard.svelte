@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import { Check, CircleAlert, ChevronLeft } from 'lucide-svelte';
@@ -39,7 +41,7 @@
 
 {#if organizeStatus === 'organizing'}
 	<Card class="p-6">
-		<h3 class="font-semibold mb-4">Organizing Files...</h3>
+		<h3 class="font-semibold mb-4">{$t('review.header.organizing')}</h3>
 
 		<div class="mb-4">
 			<div class="flex justify-between text-sm mb-1">
@@ -89,7 +91,7 @@
 						{isUpdateMode ? 'Update Complete!' : 'Organization Complete!'}
 					</h3>
 					<p class="text-sm text-green-800 dark:text-green-300 mb-3">
-						All {successCount} file(s) {isUpdateMode ? 'updated' : 'organized'} successfully
+						All {successCount} file(s) organized successfully
 					</p>
 					<p class="text-xs text-green-700 dark:text-green-400">Redirecting to browse page in a few seconds...</p>
 					<div class="mt-4">

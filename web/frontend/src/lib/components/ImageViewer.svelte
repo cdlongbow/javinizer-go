@@ -3,6 +3,8 @@
 	import { fade, scale } from 'svelte/transition';
 	import { ChevronLeft, ChevronRight, X, ZoomIn, ZoomOut } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		show: boolean;

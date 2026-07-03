@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import { quintOut } from 'svelte/easing';
 	import { slide } from 'svelte/transition';
 	import type { FileResult, Movie } from '$lib/api/types';

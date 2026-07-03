@@ -4,6 +4,8 @@
 	import { GripVertical } from 'lucide-svelte';
 	import { fade, fly } from 'svelte/transition';
 	import type { Snippet } from 'svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		items: string[];
@@ -109,7 +111,7 @@
 						onclick={() => moveUp(index)}
 						disabled={index === 0}
 						class="px-2 py-1 text-sm rounded hover:bg-accent disabled:opacity-30"
-						aria-label="Move up"
+						aria-label="{$t('scraperSelector.moveUp')}"
 					>
 						↑
 					</button>
@@ -118,7 +120,7 @@
 						onclick={() => moveDown(index)}
 						disabled={index === items.length - 1}
 						class="px-2 py-1 text-sm rounded hover:bg-accent disabled:opacity-30"
-						aria-label="Move down"
+						aria-label="{$t('scraperSelector.moveDown')}"
 					>
 						↓
 					</button>
@@ -127,7 +129,7 @@
 							type="button"
 							onclick={() => onRemove(item, index)}
 							class="px-2 py-1 text-sm rounded hover:bg-destructive/15 hover:text-destructive"
-							aria-label="Remove {item}"
+							aria-label="{$t('scraperSelector.remove')} {item}"
 						>
 							✕
 						</button>

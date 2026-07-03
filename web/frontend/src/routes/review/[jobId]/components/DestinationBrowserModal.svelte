@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale } from 'svelte/transition';
 	import { portalToBody } from '$lib/actions/portal';
@@ -44,9 +46,9 @@
 		>
 			<div class="p-6 border-b flex items-center justify-between">
 				<div>
-					<h2 class="text-xl font-bold">Select Destination Folder</h2>
+					<h2 class="text-xl font-bold">{$t('browse.destinationModal.title')}</h2>
 					<p class="text-sm text-muted-foreground mt-1">
-						Navigate to and select the folder where files will be organized
+						{$t('browse.destinationModal.description')}
 					</p>
 				</div>
 				<button onclick={onCancel} class="text-muted-foreground hover:text-foreground transition-colors">
@@ -66,7 +68,7 @@
 
 			<div class="p-6 border-t space-y-3">
 				<div class="flex items-center gap-2">
-					<span class="text-sm font-medium text-muted-foreground">Selected Path:</span>
+					<span class="text-sm font-medium text-muted-foreground">{$t('browse.destinationModal.selectedPath')}</span>
 					<code
 						class="flex-1 px-3 py-1.5 bg-accent rounded text-sm font-mono text-foreground overflow-x-auto"
 					>
@@ -75,10 +77,10 @@
 				</div>
 				<div class="flex items-center justify-end gap-2">
 					<Button variant="outline" onclick={onCancel}>
-						{#snippet children()}Cancel{/snippet}
+						{#snippet children()}{$t('browse.destinationModal.cancel')}{/snippet}
 					</Button>
 					<Button onclick={onConfirm}>
-						{#snippet children()}Use This Folder{/snippet}
+						{#snippet children()}{$t('browse.destinationModal.confirm')}{/snippet}
 					</Button>
 				</div>
 			</div>

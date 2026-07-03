@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import type { Movie } from '$lib/api/types';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
@@ -52,7 +54,7 @@
 	{#if showPosterPanel}
 		<Card class="p-4">
 			<div class="flex items-center justify-between gap-2 mb-3">
-				<h3 class="font-semibold text-sm">Poster{currentMovie.should_crop_poster ? ' (Cropped)' : ''}</h3>
+				<h3 class="font-semibold text-sm">{currentMovie.should_crop_poster ? $t('review.sidebar.posterCropped') : 'Poster'}</h3>
 				<div class="flex gap-1">
 					{#if onResetPoster}
 						<Button
@@ -61,9 +63,9 @@
 							onclick={onResetPoster}
 							disabled={!currentMovie.id || !canResetPoster}
 							class="text-xs"
-							title="Reset to original scraped poster"
+							title={$t('review.sidebar.resetPosterTitle')}
 						>
-							{#snippet children()}<RotateCcw class="h-3 w-3 mr-1" />Reset{/snippet}
+							{#snippet children()}<RotateCcw class="h-3 w-3 mr-1" />{$t('review.sidebar.resetPoster')}{/snippet}
 						</Button>
 					{/if}
 					<Button
@@ -73,7 +75,7 @@
 						disabled={!currentMovie.id}
 						class="text-xs"
 					>
-						{#snippet children()}Adjust Crop{/snippet}
+						{#snippet children()}{$t('review.sidebar.adjustCrop')}{/snippet}
 					</Button>
 				</div>
 			</div>
@@ -104,7 +106,7 @@
 				<div class="w-full aspect-2/3 bg-accent rounded border flex items-center justify-center text-muted-foreground">
 					<div class="text-center text-xs">
 						<ImageIcon class="h-8 w-8 mx-auto mb-2 opacity-50" />
-						<p>No poster</p>
+						<p>{$t('review.sidebar.noPoster')}</p>
 					</div>
 				</div>
 			{/if}

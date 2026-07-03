@@ -5,6 +5,8 @@
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
 	import type { VersionStatusResponse, SettingsConfig } from '$lib/api/types';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		config: SettingsConfig;
@@ -29,14 +31,14 @@
 		try {
 			versionStatus = await apiClient.checkVersion();
 			if (versionStatus.error) {
-				toastStore.error(`Version check failed: ${versionStatus.error}`);
+				toastStore.error(get(t)('settings.server.versionCheckFailed', { values: { error: versionStatus.error } }));
 			} else if (versionStatus.update_available) {
-				toastStore.info(`Update available: v${versionStatus.latest}`);
+				toastStore.info(get(t)('settings.server.updateAvailable', { values: { version: `v${versionStatus.latest}` } }));
 			} else {
-				toastStore.success('You are on the latest version');
+				toastStore.success(get(t)('settings.server.upToDate'));
 			}
 		} catch (e) {
-			toastStore.error(`Version check failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+			toastStore.error(get(t)('settings.server.versionCheckFailed', { values: { error: e instanceof Error ? e.message : 'Unknown error' } }));
 		} finally {
 			isCheckingVersion = false;
 		}
@@ -59,18 +61,18 @@
 	});
 </script>
 
-<SettingsSection title="Server Settings" description="Configure API server host, port, and system paths" defaultExpanded={false}>
+<SettingsSection title={$t('settings.server.title')} description={$t('settings.server.description')} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div class="p-3 bg-muted/30 rounded-lg border border-border">
 			<div class="flex items-center justify-between mb-3">
 				<div class="flex items-center gap-2">
-					<span class="text-sm font-medium">Version</span>
+					<span class="text-sm font-medium">{$t('settings.server.version')}</span>
 					{#if versionStatus}
 						<span class="text-sm text-muted-foreground">{versionStatus.current}</span>
 						{#if versionStatus.update_available}
 							<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-500/10 text-green-600">
 								<ArrowUpCircle class="h-3 w-3" />
-								Update available: {versionStatus.latest}
+								{$t('settings.server.updateAvailable', { values: { version: versionStatus.latest } })}
 							</span>
 						{/if}
 					{:else}
@@ -84,7 +86,7 @@
 					class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-input bg-background text-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50 transition-colors"
 				>
 					<RefreshCw class="h-3.5 w-3.5 {isCheckingVersion ? 'animate-spin' : ''}" />
-					{isCheckingVersion ? 'Checking...' : 'Check for Updates'}
+					{isCheckingVersion ? $t('settings.server.checking') : $t('settings.server.checkForUpdates')}
 				</button>
 			</div>
 			<div class="space-y-3">
@@ -95,11 +97,11 @@
 						bind:checked={config.system.version_check_enabled}
 						class="w-4 h-4"
 					/>
-					<label class="text-sm font-medium" for="version-check-enabled">Enable automatic version checking</label>
+					<label class="text-sm font-medium" for="version-check-enabled">{$t('settings.server.enableAutoVersionCheck')}</label>
 				</div>
 				{#if config.system.version_check_enabled}
 					<div>
-						<label class="block text-sm font-medium mb-2" for="version-check-interval">Check Interval (hours)</label>
+						<label class="block text-sm font-medium mb-2" for="version-check-interval">{$t('settings.server.checkInterval')}</label>
 						<input
 							id="version-check-interval"
 							type="number"
@@ -115,16 +117,16 @@
 
 		<div class="grid grid-cols-2 gap-4">
 			<div>
-				<label class="block text-sm font-medium mb-2" for="server-host">Host</label>
+				<label class="block text-sm font-medium mb-2" for="server-host">{$t('settings.server.host')}</label>
 				<input id="server-host" type="text" bind:value={config.server.host} class={inputClass} placeholder="localhost" />
 			</div>
 			<div>
-				<label class="block text-sm font-medium mb-2" for="server-port">Port</label>
+				<label class="block text-sm font-medium mb-2" for="server-port">{$t('settings.server.port')}</label>
 				<input id="server-port" type="number" bind:value={config.server.port} class={inputClass} placeholder="8080" />
 			</div>
 		</div>
 		<div>
-			<label class="block text-sm font-medium mb-2" for="system-temp-dir">Temporary Directory</label>
+			<label class="block text-sm font-medium mb-2" for="system-temp-dir">{$t('settings.server.tempDir')}</label>
 			<input
 				id="system-temp-dir"
 				type="text"
@@ -133,7 +135,7 @@
 				class={inputClass}
 				placeholder="data/temp"
 			/>
-			<p class="text-xs text-muted-foreground mt-1">Base directory for temporary files (default: data/temp). Cannot contain path traversal patterns.</p>
+			<p class="text-xs text-muted-foreground mt-1">{$t('settings.server.tempDirHint')}</p>
 		</div>
 	</div>
 </SettingsSection>

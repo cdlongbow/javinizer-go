@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { ChevronDown, ChevronUp, Image, LayoutGrid, List, LoaderCircle, Play, RefreshCw, Settings2, X, CheckSquare, Square, Trash2, RotateCcw, MousePointerClick, Save } from 'lucide-svelte';
 	import type { CompletenessTier } from '$lib/utils/completeness';
@@ -84,16 +86,25 @@
 		{ tier: 'partial', label: 'Partial', dotClass: 'bg-yellow-500' },
 		{ tier: 'complete', label: 'Complete', dotClass: 'bg-green-500' },
 	];
+
+	function tierLabel(tier: string): string {
+		switch (tier) {
+			case 'incomplete': return $t('review.header.incomplete');
+			case 'partial': return $t('review.header.partial');
+			case 'complete': return $t('review.header.complete');
+			default: return tier;
+		}
+	}
 </script>
 
 <div class="flex items-center justify-between mb-6">
 	<div>
-		<h1 class="text-3xl font-bold">Review & Edit Metadata</h1>
+		<h1 class="text-3xl font-bold">{$t('review.header.title')}</h1>
 		<p class="text-muted-foreground mt-1">
 			{#if isUpdateMode}
-				Metadata and media files have been updated in place. Review and edit as needed.
+				{$t('review.header.updateDescription')}
 			{:else}
-				Review and edit scraped metadata before organizing files
+				{$t('review.header.organizeDescription')}
 			{/if}
 		</p>
 	</div>
@@ -107,7 +118,7 @@
 			>
 				{#snippet children()}
 					<List class="h-4 w-4 mr-1" />
-					Detail
+					{$t('review.header.view.detail')}
 				{/snippet}
 			</Button>
 			<Button
@@ -118,7 +129,7 @@
 			>
 				{#snippet children()}
 					<LayoutGrid class="h-4 w-4 mr-1" />
-					Poster
+					{$t('review.header.view.poster')}
 				{/snippet}
 			</Button>
 			<Button
@@ -129,27 +140,27 @@
 			>
 				{#snippet children()}
 					<Image class="h-4 w-4 mr-1" />
-					Cover
+					{$t('review.header.view.cover')}
 				{/snippet}
 			</Button>
 		</div>
 		<div class="h-8 w-px bg-border"></div>
 		{#if hasEdits}
-			<Button onclick={() => { void Promise.resolve(onSaveAll()).catch(() => {}); }} disabled={savingEdits || organizing} title="Save pending edits to the database">
+			<Button onclick={() => { void Promise.resolve(onSaveAll()).catch(() => {}); }} disabled={savingEdits || organizing} title={$t('review.header.saveChanges')}>
 				{#snippet children()}
 					{#if savingEdits}
 						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
 					{:else}
 						<Save class="h-4 w-4 mr-2" />
 					{/if}
-					{savingEdits ? 'Saving...' : `Save changes${editCount > 1 ? ` (${editCount})` : ''}`}
+					{savingEdits ? $t('review.header.saving') : editCount > 1 ? `{$t('review.header.saveChanges')} (${editCount})` : $t('review.header.saveChanges')}
 				{/snippet}
 			</Button>
 		{/if}
 		<Button variant="outline" onclick={onClose} disabled={organizing}>
 			{#snippet children()}
 				<X class="h-4 w-4 mr-2" />
-				{isUpdateMode ? 'Close' : 'Cancel'}
+				{isUpdateMode ? $t('review.header.close') : $t('review.header.cancel')}
 			{/snippet}
 		</Button>
 		{#if isUpdateMode}
@@ -160,7 +171,7 @@
 					{:else}
 						<RefreshCw class="h-4 w-4 mr-2" />
 					{/if}
-					{organizing ? 'Updating...' : `Update ${movieResultsLength} File${movieResultsLength !== 1 ? 's' : ''}`}
+					{organizing ? $t('review.header.updating') : $t('review.header.updateFiles', { values: { count: movieResultsLength } })}
 				{/snippet}
 			</Button>
 		{:else}
@@ -171,7 +182,7 @@
 					{:else}
 						<Play class="h-4 w-4 mr-2" />
 					{/if}
-					{organizing ? 'Organizing...' : `Organize ${movieResultsLength} File${movieResultsLength !== 1 ? 's' : ''}`}
+					{organizing ? $t('review.header.organizing') : $t('review.header.organizeFiles', { values: { count: movieResultsLength } })}
 				{/snippet}
 			</Button>
 		{/if}
@@ -188,7 +199,7 @@
 		>
 			{#snippet children()}
 				<MousePointerClick class="h-4 w-4 mr-1" />
-				Select
+				{$t('review.header.select')}
 			{/snippet}
 		</Button>
 		{#if selectionMode}
@@ -200,10 +211,10 @@
 				{#snippet children()}
 					{#if allSelected}
 						<CheckSquare class="h-4 w-4 mr-1" />
-						Deselect All
+						{$t('review.header.deselectAll')}
 					{:else}
 						<Square class="h-4 w-4 mr-1" />
-						Select All
+						{$t('review.header.selectAll')}
 					{/if}
 				{/snippet}
 			</Button>
@@ -221,14 +232,14 @@
 					disabled={count === 0}
 				>
 					<span class="w-2 h-2 rounded-full {isActive ? dotClass : 'bg-muted-foreground/30'}"></span>
-					{label} ({count})
+					{tierLabel(tier)} ({count})
 				</button>
 			{/each}
 		</div>
 		{#if selectedCount > 0}
 			<div class="ml-auto flex items-center gap-3">
 				<span class="text-sm font-medium text-muted-foreground whitespace-nowrap">
-					{selectedCount} selected
+					{selectedCount} {$t('review.header.selectedCount')}
 				</span>
 				<Button
 					size="sm"
@@ -243,7 +254,7 @@
 						{:else}
 							<Trash2 class="h-4 w-4 mr-1" />
 						{/if}
-						Remove
+						{$t('review.header.remove')}
 					{/snippet}
 				</Button>
 				<Button
@@ -258,7 +269,7 @@
 						{:else}
 							<RotateCcw class="h-4 w-4 mr-1" />
 						{/if}
-						Rescrape
+{$t('review.header.rescrape')}
 					{/snippet}
 				</Button>
 			</div>
@@ -273,7 +284,7 @@
 			class="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
 		>
 			<Settings2 class="h-4 w-4" />
-			Options
+			{$t('review.header.options')}
 			{#if showOptions}
 				<ChevronUp class="h-3 w-3" />
 			{:else}
@@ -292,8 +303,8 @@
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
-						<span class="text-sm font-medium">Force Overwrite</span>
-						<p class="text-xs text-muted-foreground">Ignore existing NFO, use only scraper data</p>
+						<span class="text-sm font-medium">{$t('review.header.forceOverwrite')}</span>
+						<p class="text-xs text-muted-foreground">{$t('review.header.forceOverwriteDesc')}</p>
 					</div>
 				</label>
 
@@ -306,8 +317,8 @@
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
-						<span class="text-sm font-medium">Preserve NFO</span>
-						<p class="text-xs text-muted-foreground">Never overwrite NFO fields, only add missing</p>
+						<span class="text-sm font-medium">{$t('review.header.preserveNfo')}</span>
+						<p class="text-xs text-muted-foreground">{$t('review.header.preserveNfoDesc')}</p>
 					</div>
 				</label>
 
@@ -320,8 +331,8 @@
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
-						<span class="text-sm font-medium">Skip NFO</span>
-						<p class="text-xs text-muted-foreground">Don't generate NFO metadata files</p>
+						<span class="text-sm font-medium">{$t('review.header.skipNfo')}</span>
+						<p class="text-xs text-muted-foreground">{$t('review.header.skipNfoDesc')}</p>
 					</div>
 				</label>
 
@@ -334,8 +345,8 @@
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
-						<span class="text-sm font-medium">Skip Download</span>
-						<p class="text-xs text-muted-foreground">Don't download cover, poster, and screenshots</p>
+						<span class="text-sm font-medium">{$t('review.header.skipDownload')}</span>
+						<p class="text-xs text-muted-foreground">{$t('review.header.skipDownloadDesc')}</p>
 					</div>
 				</label>
 			</div>

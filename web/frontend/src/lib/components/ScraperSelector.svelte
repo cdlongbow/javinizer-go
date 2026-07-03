@@ -5,6 +5,8 @@
 	import Button from './ui/Button.svelte';
 	import { GripVertical, ChevronUp, ChevronDown, X } from 'lucide-svelte';
 	import { fade, fly } from 'svelte/transition';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	let { scrapers = [], selected = $bindable([]), disabled = false }: {
 		scrapers?: Scraper[];
@@ -106,13 +108,13 @@
 
 <div class="border rounded-lg p-4">
 	<div class="flex items-center justify-between mb-4">
-		<h3 class="text-sm font-medium">Select Scrapers & Set Priority</h3>
+		<h3 class="text-sm font-medium">{$t('scraperSelector.title')}</h3>
 		<div class="flex gap-2">
 			<Button variant="outline" size="sm" onclick={selectAll} {disabled}>
-				{#snippet children()}All{/snippet}
+				{#snippet children()}{$t('scraperSelector.all')}{/snippet}
 			</Button>
 			<Button variant="outline" size="sm" onclick={selectNone} {disabled}>
-				{#snippet children()}None{/snippet}
+				{#snippet children()}{$t('scraperSelector.none')}{/snippet}
 			</Button>
 		</div>
 	</div>
@@ -121,7 +123,7 @@
 		<!-- Selected scrapers with priority order -->
 		<div class="mb-4">
 			<div class="text-xs text-muted-foreground mb-2">
-				Priority Order (drag to reorder, higher = more priority)
+				{$t('scraperSelector.priorityOrder')}
 			</div>
 			<div class="space-y-2">
 				{#each selectedScrapers as scraper, index (scraper.name)}
@@ -165,7 +167,7 @@
 								class="p-1 hover:bg-accent rounded transition-colors {disabled || index === 0
 									? 'opacity-30 cursor-not-allowed'
 									: 'cursor-pointer'}"
-								title="Move up"
+								title="{$t('scraperSelector.moveUp')}"
 							>
 								<ChevronUp class="h-4 w-4" />
 							</button>
@@ -176,7 +178,7 @@
 								index === selected.length - 1
 									? 'opacity-30 cursor-not-allowed'
 									: 'cursor-pointer'}"
-								title="Move down"
+								title="{$t('scraperSelector.moveDown')}"
 							>
 								<ChevronDown class="h-4 w-4" />
 							</button>
@@ -186,7 +188,7 @@
 								class="p-1 hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 rounded transition-colors {disabled
 									? 'opacity-30 cursor-not-allowed'
 									: 'cursor-pointer'}"
-								title="Remove"
+								title="{$t('scraperSelector.remove')}"
 							>
 								<X class="h-4 w-4" />
 							</button>
@@ -201,7 +203,7 @@
 		<!-- Available scrapers to add -->
 		<div>
 			<div class="text-xs text-muted-foreground mb-2">
-				{selected.length > 0 ? 'Add More Scrapers' : 'Available Scrapers'}
+				{selected.length > 0 ? $t('scraperSelector.addMore') : $t('scraperSelector.available')}
 			</div>
 			<div class="space-y-1">
 				{#each unselectedScrapers as scraper}
@@ -224,7 +226,7 @@
 
 	{#if selected.length === 0 && unselectedScrapers.length === 0}
 		<div class="text-center py-4 text-sm text-muted-foreground">
-			No scrapers available. Please enable scrapers in settings.
+			{$t('scraperSelector.noScrapers')}
 		</div>
 	{/if}
 </div>

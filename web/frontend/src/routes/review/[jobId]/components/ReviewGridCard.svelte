@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import type { FileResult, Movie, CompletenessConfig } from '$lib/api/types';
 	import { CircleAlert, Image as ImageIcon } from 'lucide-svelte';
 	import { calculateCompleteness } from '$lib/utils/completeness';
@@ -84,7 +86,7 @@
 	class="group text-left rounded-lg border {selectionMode ? (isBulkSelected ? 'ring-2 ring-blue-500 border-blue-500/50' : 'border-border') : (isSelected ? 'ring-2 ring-primary' : 'border-border')} bg-card overflow-visible cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-md focus-visible:outline-none focus-visible:ring-2 {selectionMode ? 'focus-visible:ring-blue-500' : 'focus-visible:ring-primary'}"
 	role={selectionMode ? 'checkbox' : 'button'}
 	tabindex="0"
-	aria-label="{selectionMode ? 'Select' : 'View details for'} {movieGroup.movieId}"
+	aria-label="{selectionMode ? $t('review.header.select') : 'View details for'} {movieGroup.movieId}"
 	aria-checked={selectionMode ? isBulkSelected : undefined}
 	onclick={(e: MouseEvent) => onclick(e)}
 	onkeydown={(e: KeyboardEvent) => {

@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import { LoaderCircle, Play, X } from 'lucide-svelte';
@@ -28,7 +30,7 @@
 			<Button variant="outline" onclick={onCancel} disabled={organizing}>
 				{#snippet children()}
 					<X class="h-4 w-4 mr-2" />
-					Cancel
+					{$t('review.header.cancel')}
 				{/snippet}
 			</Button>
 			<Button onclick={onOrganizeAll} disabled={organizing || !destinationPath.trim()}>
@@ -38,7 +40,7 @@
 					{:else}
 						<Play class="h-4 w-4 mr-2" />
 					{/if}
-					{organizing ? 'Organizing...' : `Organize ${movieResultsLength} File${movieResultsLength !== 1 ? 's' : ''}`}
+					{organizing ? $t('review.header.organizing') : $t('review.header.organizeFiles', { values: { count: movieResultsLength } })}
 				{/snippet}
 			</Button>
 		</div>

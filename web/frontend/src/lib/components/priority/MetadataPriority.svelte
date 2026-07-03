@@ -4,6 +4,8 @@
 	import { X, Info } from 'lucide-svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { confirmDialog } from '$lib/stores/dialog.svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from '../ui/Card.svelte';
 	import Button from '../ui/Button.svelte';
 	import DraggableList from './DraggableList.svelte';
@@ -358,7 +360,7 @@
 								? 'bg-primary text-primary-foreground'
 								: 'hover:bg-accent'}"
 						>
-							Simple
+Simple
 						</button>
 						<button
 							type="button"
@@ -368,7 +370,7 @@
 								? 'bg-primary text-primary-foreground'
 								: 'hover:bg-accent'}"
 						>
-							Advanced
+Advanced
 							{#if getOverrideCount() > 0}
 								<span class="ml-1 text-xs">({getOverrideCount()})</span>
 							{/if}
@@ -455,7 +457,7 @@
 		{#if mode === 'advanced'}
 			<div class="space-y-4" transition:slide|local={{ duration: 220, easing: cubicOut }}>
 				<div class="flex items-center justify-between">
-					<h3 class="text-sm font-medium">Per-Field Overrides</h3>
+					<h3 class="text-sm font-medium">{$t('settings.metadataPriority.title')}</h3>
 					<label class="flex items-center gap-2 text-sm">
 						<input type="checkbox" bind:checked={showOnlyOverrides} class="rounded" />
 						<span class="text-muted-foreground">Show only overridden</span>

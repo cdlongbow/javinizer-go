@@ -12,6 +12,8 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import Card from '$lib/components/ui/Card.svelte';
 	import ProvenanceBadge from '$lib/components/ProvenanceBadge.svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		isOpen: boolean;
@@ -112,7 +114,7 @@
 							? 'border-primary text-primary'
 							: 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'}"
 					>
-						Statistics
+Statistics
 					</button>
 					<button
 						onclick={() => (activeTab = 'raw')}
@@ -187,7 +189,7 @@
 												<div class="space-y-1">
 													<div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
 														<Check class="h-3 w-3" />
-														<span>Merged Result</span>
+														<span class="font-medium">Merged Result</span>
 													</div>
 													<div class="rounded bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800 p-3">
 														<code class="text-sm text-foreground break-all">

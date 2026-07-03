@@ -3,6 +3,8 @@
 	import { quintOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
 	import { Pencil, Trash2 } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { Actress } from '$lib/api/types';
@@ -38,7 +40,7 @@
 						checked={isSelected(actress)}
 						disabled={!actress.id}
 						onchange={() => onToggleSelection(actress)}
-						aria-label="Select actress for merge"
+						aria-label="{$t('actresses.toolbar.selectPage')}"
 						class="rounded border-input"
 					/>
 					<div class="flex-1 min-w-0">

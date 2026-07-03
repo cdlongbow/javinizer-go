@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import type { SettingsConfig } from '$lib/api/types';
 
@@ -10,10 +12,10 @@
 	let { config, inputClass }: Props = $props();
 </script>
 
-<SettingsSection title="File Matching Settings" description="Configure file scanning, extensions, and ID extraction patterns" defaultExpanded={false}>
+<SettingsSection title={$t('settings.fileMatching.title')} description={$t('settings.fileMatching.description')} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div>
-			<label class="block text-sm font-medium mb-2" for="file-extensions">File Extensions</label>
+			<label class="block text-sm font-medium mb-2" for="file-extensions">{$t('settings.fileMatching.extensions')}</label>
 			<input
 				id="file-extensions"
 				type="text"
@@ -27,12 +29,12 @@
 				placeholder=".mp4, .mkv, .avi"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Comma-separated list of video file extensions to scan
+				{$t('settings.fileMatching.extensionsHint')}
 			</p>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="min-size-mb">Minimum File Size (MB)</label>
+			<label class="block text-sm font-medium mb-2" for="min-size-mb">{$t('settings.fileMatching.minSize')}</label>
 			<input
 				id="min-size-mb"
 				type="number"
@@ -42,12 +44,12 @@
 				max="10000"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Ignore files smaller than this (0 = no minimum)
+				{$t('settings.fileMatching.minSizeHint')}
 			</p>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="exclude-patterns">Exclude Patterns</label>
+			<label class="block text-sm font-medium mb-2" for="exclude-patterns">{$t('settings.fileMatching.excludePatterns')}</label>
 			<input
 				id="exclude-patterns"
 				type="text"
@@ -62,20 +64,20 @@
 				placeholder="*-trailer*, *-sample*"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Glob patterns to exclude from scanning
+				{$t('settings.fileMatching.excludePatternsHint')}
 			</p>
 		</div>
 
 			<div class="space-y-3">
 				<label class="flex items-center gap-2">
 					<input type="checkbox" bind:checked={config.file_matching.regex_enabled} class="rounded" />
-					<span>Enable Custom Regex Pattern</span>
+					<span>{$t('settings.fileMatching.enableCustomRegex')}</span>
 				</label>
 			</div>
 
 			<fieldset disabled={!config.file_matching.regex_enabled} class={`${!config.file_matching.regex_enabled ? 'opacity-60' : ''}`}>
 				<div>
-					<label class="block text-sm font-medium mb-2" for="regex-pattern">Regex Pattern</label>
+					<label class="block text-sm font-medium mb-2" for="regex-pattern">{$t('settings.fileMatching.regexPattern')}</label>
 					<input
 						id="regex-pattern"
 						type="text"
@@ -83,7 +85,7 @@
 						class="{inputClass} font-mono text-sm"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Custom regex pattern to extract movie IDs from filenames
+						{$t('settings.fileMatching.regexPatternHint')}
 					</p>
 				</div>
 			</fieldset>

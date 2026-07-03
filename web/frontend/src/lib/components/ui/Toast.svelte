@@ -3,6 +3,8 @@
 	import { cubicOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
 	import { CircleCheckBig, X, CircleAlert, Info, CircleX } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		id: string;
@@ -86,7 +88,7 @@
 	<button
 		onclick={handleDismiss}
 		class="shrink-0 p-1 hover:bg-white/20 rounded transition-colors"
-		aria-label="Dismiss"
+		aria-label={$t('toast.dismiss')}
 	>
 		<X class="h-4 w-4" />
 	</button>

@@ -3,6 +3,8 @@
 	import { quintOut } from 'svelte/easing';
 	import { fly } from 'svelte/transition';
 	import { Pencil, Trash2, ImageOff } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { Actress } from '$lib/api/types';
@@ -47,7 +49,7 @@
 							checked={isSelected(actress)}
 							disabled={!actress.id}
 							onchange={() => onToggleSelection(actress)}
-							aria-label="Select actress for merge"
+							aria-label="{$t('actresses.toolbar.selectPage')}"
 							class="rounded border-input"
 						/>
 					</div>
@@ -80,12 +82,12 @@
 							<p class="text-sm text-muted-foreground truncate">{actress.japanese_name}</p>
 						{/if}
 						{#if actress.aliases}
-							<p class="text-xs text-muted-foreground line-clamp-2 mt-1">Aliases: {actress.aliases}</p>
+							<p class="text-xs text-muted-foreground line-clamp-2 mt-1">{$t('actresses.form.aliases')}: {actress.aliases}</p>
 						{/if}
 						<div class="flex items-center gap-2 mt-3">
 							<Button variant="outline" size="sm" onclick={() => onStartEdit(actress)}>
 								<Pencil class="h-4 w-4" />
-								Edit
+								{$t('common.edit')}
 							</Button>
 							<Button
 								variant="outline"
@@ -95,7 +97,7 @@
 								class="text-destructive hover:bg-destructive/10"
 							>
 								<Trash2 class="h-4 w-4" />
-								Delete
+								{$t('common.delete')}
 							</Button>
 						</div>
 					</div>

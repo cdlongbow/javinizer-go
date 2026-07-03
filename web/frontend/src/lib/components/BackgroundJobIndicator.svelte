@@ -6,6 +6,8 @@
 	import { getBackgroundJobState } from '$lib/stores/background-job.svelte';
 	import { isTerminalStatus, computeJobProgress } from '$lib/utils/job-progress';
 	import { LoaderCircle, X, ChevronUp, ChevronDown, Check, XCircle, Ban, FolderInput } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	const iconMap = {
 		spinner: LoaderCircle,

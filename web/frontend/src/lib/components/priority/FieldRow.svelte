@@ -2,6 +2,8 @@
 	import { SquarePen, RotateCcw } from 'lucide-svelte';
 	import Button from '../ui/Button.svelte';
 	import type { FieldStatus } from './priority';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		fieldName: string;

@@ -2,6 +2,8 @@
 	import type { Movie } from '$lib/api/types';
 	import { formatDuration } from '$lib/utils';
 	import { Calendar, Clock, Star, Film } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from './ui/Card.svelte';
 	import Button from './ui/Button.svelte';
 

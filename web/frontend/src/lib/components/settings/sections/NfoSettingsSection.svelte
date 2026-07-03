@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormTemplateInput from '$lib/components/settings/FormTemplateInput.svelte';
@@ -14,11 +16,11 @@
 	const nfoEnabled = $derived(config?.metadata?.nfo?.enabled ?? true);
 </script>
 
-<SettingsSection title="NFO Settings" description="Configure NFO metadata file generation for Kodi/Plex compatibility" defaultExpanded={false}>
-	<SettingsSubsection title="Basic NFO Options">
+<SettingsSection title={$t('settings.nfo.title')} description={$t('settings.nfo.description')} defaultExpanded={false}>
+	<SettingsSubsection title={$t('settings.nfo.basicOptions')}>
 		<FormToggle
-			label="Enable NFO generation"
-			description="Generate .nfo metadata files for use with media servers like Kodi and Plex"
+			label={$t('settings.nfo.enableGeneration')}
+			description={$t('settings.nfo.enableGenerationDesc')}
 			checked={config.metadata.nfo?.enabled ?? true}
 			onchange={(val) => {
 				if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -28,8 +30,8 @@
 
 		<fieldset disabled={!nfoEnabled} class={`space-y-0 ${!nfoEnabled ? 'opacity-60' : ''}`}>
 			<FormToggle
-				label="NFO per file"
-				description="Create separate NFO files for each video file (useful for multi-part movies)"
+				label={$t('settings.nfo.perFile')}
+				description={$t('settings.nfo.perFileDesc')}
 				checked={config.metadata.nfo?.per_file ?? false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -38,8 +40,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Display title template"
-				description="Template for the <title> field in NFO files"
+				label={$t('settings.nfo.displayTitleTemplate')}
+				description={$t('settings.nfo.displayTitleTemplateDesc')}
 				value={config.metadata.nfo?.display_title ?? '[<ID>] <TITLE>'}
 				placeholder="[<ID>] <TITLE>"
 				showTagList={true}
@@ -50,8 +52,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Filename template"
-				description="Template for NFO filenames"
+				label={$t('settings.nfo.filenameTemplate')}
+				description={$t('settings.nfo.filenameTemplateDesc')}
 				value={config.metadata.nfo?.filename_template ?? '<ID>'}
 				placeholder="<ID>"
 				onchange={(val) => {
@@ -62,11 +64,11 @@
 		</fieldset>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="Actress Settings">
+	<SettingsSubsection title={$t('settings.nfo.actressSettings')}>
 		<fieldset disabled={!nfoEnabled} class={`space-y-0 ${!nfoEnabled ? 'opacity-60' : ''}`}>
 			<FormToggle
-				label="First name order"
-				description="Use first-name-first order for actress names (Western style)"
+				label={$t('settings.nfo.firstNameOrder')}
+				description={$t('settings.nfo.firstNameOrderDesc')}
 				checked={config.metadata.nfo?.first_name_order ?? false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -75,8 +77,8 @@
 			/>
 
 			<FormToggle
-				label="Japanese actress names"
-				description="Use Japanese names for actresses in NFO files"
+				label={$t('settings.nfo.japaneseNames')}
+				description={$t('settings.nfo.japaneseNamesDesc')}
 				checked={config.metadata.nfo?.actress_language_ja ?? false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -85,8 +87,8 @@
 			/>
 
 			<FormToggle
-				label="Unknown actress fallback"
-				description="Show placeholder text when no actress information is available (off = omit entirely)"
+				label={$t('settings.nfo.unknownActressFallback')}
+				description={$t('settings.nfo.unknownActressFallbackDesc')}
 				checked={config.metadata.nfo?.unknown_actress_mode === 'fallback'}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -96,8 +98,8 @@
 
 			{#if config.metadata.nfo?.unknown_actress_mode === 'fallback'}
 			<FormTextInput
-				label="Unknown actress text"
-				description="Text to display when actress information is unavailable"
+				label={$t('settings.nfo.unknownActressText')}
+				description={$t('settings.nfo.unknownActressTextDesc')}
 				value={config.metadata.nfo?.unknown_actress_text ?? 'Unknown'}
 				placeholder="Unknown"
 				onchange={(val) => {
@@ -108,8 +110,8 @@
 			{/if}
 
 			<FormToggle
-				label="Actress as tag"
-				description="Include actress names in the <tag> field"
+				label={$t('settings.nfo.actressAsTag')}
+				description={$t('settings.nfo.actressAsTagDesc')}
 				checked={config.metadata.nfo?.actress_as_tag ?? false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -118,8 +120,8 @@
 			/>
 
 			<FormToggle
-				label="Add generic role"
-				description="Add 'Actress' as a generic role for all performers"
+				label={$t('settings.nfo.addGenericRole')}
+				description={$t('settings.nfo.addGenericRoleDesc')}
 				checked={config.metadata.nfo?.add_generic_role ?? false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -128,8 +130,8 @@
 			/>
 
 			<FormToggle
-				label="Use alternate name for role"
-				description="Use actress alternate names in <role> field"
+				label={$t('settings.nfo.useAlternateNameRole')}
+				description={$t('settings.nfo.useAlternateNameRoleDesc')}
 				checked={config.metadata.nfo?.alt_name_role ?? false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -139,11 +141,11 @@
 		</fieldset>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="Media Information">
+	<SettingsSubsection title={$t('settings.nfo.mediaInfo')}>
 		<fieldset disabled={!nfoEnabled} class={`space-y-0 ${!nfoEnabled ? 'opacity-60' : ''}`}>
 			<FormToggle
-				label="Include stream details"
-				description="Include video/audio codec information from MediaInfo analysis"
+				label={$t('settings.nfo.includeStreamDetails')}
+				description={$t('settings.nfo.includeStreamDetailsDesc')}
 				checked={config.metadata.nfo?.include_stream_details ?? false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -152,8 +154,8 @@
 			/>
 
 			<FormToggle
-				label="Include fanart"
-				description="Include fanart/cover image reference in NFO"
+				label={$t('settings.nfo.includeFanart')}
+				description={$t('settings.nfo.includeFanartDesc')}
 				checked={config.metadata.nfo?.include_fanart ?? true}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -162,8 +164,8 @@
 			/>
 
 			<FormToggle
-				label="Include trailer"
-				description="Include trailer video reference in NFO"
+				label={$t('settings.nfo.includeTrailer')}
+				description={$t('settings.nfo.includeTrailerDesc')}
 				checked={config.metadata.nfo?.include_trailer ?? true}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -172,8 +174,8 @@
 			/>
 
 			<FormTextInput
-				label="Rating source"
-				description="Source name for movie ratings (e.g., 'r18dev', 'dmm')"
+				label={$t('settings.nfo.ratingSource')}
+				description={$t('settings.nfo.ratingSourceDesc')}
 				value={config.metadata.nfo?.rating_source ?? 'r18dev'}
 				placeholder="r18dev"
 				onchange={(val) => {
@@ -184,11 +186,11 @@
 		</fieldset>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="Advanced NFO Options">
+	<SettingsSubsection title={$t('settings.nfo.advancedOptions')}>
 		<fieldset disabled={!nfoEnabled} class={`space-y-0 ${!nfoEnabled ? 'opacity-60' : ''}`}>
 			<FormToggle
-				label="Include original path"
-				description="Include the original file path in NFO metadata"
+				label={$t('settings.nfo.includeOriginalPath')}
+				description={$t('settings.nfo.includeOriginalPathDesc')}
 				checked={config.metadata.nfo?.include_originalpath ?? false}
 				onchange={(val) => {
 					if (!config.metadata.nfo) config.metadata.nfo = {};
@@ -197,8 +199,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Tag template"
-				description="Template for custom tags in NFO files"
+				label={$t('settings.nfo.tagTemplate')}
+				description={$t('settings.nfo.tagTemplateDesc')}
 				value={(Array.isArray(config.metadata.nfo?.tag) ? config.metadata.nfo.tag.join(', ') : config.metadata.nfo?.tag) ?? '<SET>'}
 				placeholder="<SET>"
 				showTagList={true}
@@ -212,8 +214,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Tagline template"
-				description="Template for the tagline field in NFO files"
+				label={$t('settings.nfo.taglineTemplate')}
+				description={$t('settings.nfo.taglineTemplateDesc')}
 				value={config.metadata.nfo?.tagline ?? ''}
 				placeholder=""
 				onchange={(val) => {
@@ -223,8 +225,8 @@
 			/>
 
 			<FormTextInput
-				label="Credits"
-				description="Credits to include in NFO (comma-separated)"
+				label={$t('settings.nfo.credits')}
+				description={$t('settings.nfo.creditsDesc')}
 				value={config.metadata.nfo?.credits?.join(', ') ?? ''}
 				placeholder="Director Name, Studio Name"
 				onchange={(val) => {

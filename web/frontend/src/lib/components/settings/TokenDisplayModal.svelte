@@ -6,6 +6,8 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { AlertTriangle, Copy, Check, X } from 'lucide-svelte';
 	import type { CreateTokenResponse } from '$lib/types/token';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		tokenResponse: CreateTokenResponse | null;
@@ -62,7 +64,7 @@
 			onkeydown={(e) => e.stopPropagation()}
 			role="dialog"
 			aria-modal="true"
-			aria-label="API Token Created"
+			aria-label={$t('tokenDisplay.title')}
 			tabindex="-1"
 		>
 			<Card class="w-full">
@@ -72,14 +74,14 @@
 							<AlertTriangle class="h-5 w-5 text-amber-600 dark:text-amber-400" />
 						</div>
 						<h2 class="text-lg font-semibold">
-							API Token Created
+							{$t('tokenDisplay.title')}
 						</h2>
 					</div>
 					<button
 						type="button"
 						class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
 						onclick={onClose}
-						aria-label="Close"
+						aria-label={$t('common.close')}
 					>
 						<X class="h-5 w-5" />
 					</button>
@@ -88,19 +90,19 @@
 				<div class="p-6 space-y-4">
 					<div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
 						<p class="text-sm text-amber-800 dark:text-amber-200 font-medium">
-							This token value will not be shown again. Copy it now.
+							{$t('tokenDisplay.notShownAgain')}
 						</p>
 					</div>
 
 					{#if tokenResponse.name}
 						<div>
-							<label for="token-name-display" class="block text-xs font-medium text-muted-foreground mb-1">Name</label>
+							<label for="token-name-display" class="block text-xs font-medium text-muted-foreground mb-1">{$t('tokenDisplay.name')}</label>
 							<p id="token-name-display" class="text-sm">{tokenResponse.name}</p>
 						</div>
 					{/if}
 
 					<div>
-						<label for="token-value-input" class="block text-xs font-medium text-muted-foreground mb-1">Token</label>
+						<label for="token-value-input" class="block text-xs font-medium text-muted-foreground mb-1">{$t('tokenDisplay.token')}</label>
 						<div class="flex items-center gap-2">
 							<input
 								id="token-value-input"
@@ -116,10 +118,10 @@
 							>
 								{#if copied}
 									<Check class="h-4 w-4 mr-1" />
-									Copied!
+									{$t('tokenDisplay.copied')}
 								{:else}
 									<Copy class="h-4 w-4 mr-1" />
-									Copy
+									{$t('tokenDisplay.copy')}
 								{/if}
 							</Button>
 						</div>
@@ -128,7 +130,7 @@
 
 				<div class="flex items-center justify-end p-6 border-t">
 					<Button variant="outline" onclick={onClose}>
-						Close
+						{$t('tokenDisplay.close')}
 					</Button>
 				</div>
 			</Card>

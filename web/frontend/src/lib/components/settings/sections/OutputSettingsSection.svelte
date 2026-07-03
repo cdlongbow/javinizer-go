@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormNumberInput from '$lib/components/settings/FormNumberInput.svelte';
@@ -15,12 +17,12 @@
 	let { config, inputClass }: Props = $props();
 </script>
 
-<SettingsSection title="Output Settings" description="Configure output paths, templates, and download options" defaultExpanded={false}>
+<SettingsSection title={$t('settings.output.title')} description={$t('settings.output.description')} defaultExpanded={false}>
 	<div class="space-y-4">
-		<SettingsSubsection title="Template Options">
+		<SettingsSubsection title={$t('settings.output.templateOptions')}>
 			<FormNumberInput
-				label="Max title length"
-				description="Maximum characters for movie titles in folder names. Longer titles will be intelligently truncated."
+				label={$t('settings.output.maxTitleLength')}
+				description={$t('settings.output.maxTitleLengthDesc')}
 				value={config.output.max_title_length ?? 100}
 				min={10}
 				max={500}
@@ -31,8 +33,8 @@
 			/>
 
 			<FormNumberInput
-				label="Max path length"
-				description="Maximum total path length to prevent Windows path errors (MAX_PATH = 260)"
+				label={$t('settings.output.maxPathLength')}
+				description={$t('settings.output.maxPathLengthDesc')}
 				value={config.output.max_path_length ?? 240}
 				min={100}
 				max={250}
@@ -43,8 +45,8 @@
 			/>
 
 			<FormToggle
-				label="Group actress"
-				description="Replace multiple actresses with a group folder name in templates (e.g., '@Group')"
+				label={$t('settings.output.groupActress')}
+				description={$t('settings.output.groupActressDesc')}
 				checked={config.output.group_actress ?? false}
 				onchange={(val) => {
 					config.output.group_actress = val;
@@ -53,7 +55,7 @@
 
 			{#if config.output.group_actress}
 				<div class="py-4 border-b border-border">
-					<label class="block text-sm font-medium mb-2" for="group-actress-name">Group actress name</label>
+					<label class="block text-sm font-medium mb-2" for="group-actress-name">{$t('settings.output.groupActressName')}</label>
 					<input
 						id="group-actress-name"
 						type="text"
@@ -62,13 +64,13 @@
 						placeholder="@Group"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Folder name used when a movie has multiple actresses (default: @Group)
+						{$t('settings.output.groupActressNameHint')}
 					</p>
 				</div>
 			{/if}
 
 			<div class="py-4 border-b border-border">
-				<label class="block text-sm font-medium mb-2" for="delimiter">Delimiter</label>
+				<label class="block text-sm font-medium mb-2" for="delimiter">{$t('settings.output.delimiter')}</label>
 				<input
 					id="delimiter"
 					type="text"
@@ -77,13 +79,13 @@
 					placeholder=", "
 				/>
 				<p class="text-xs text-muted-foreground mt-1">
-					Character(s) used to separate multiple values (e.g., actresses, genres)
+					{$t('settings.output.delimiterHint')}
 				</p>
 			</div>
 		</SettingsSubsection>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="subfolder-format">Subfolder Format</label>
+			<label class="block text-sm font-medium mb-2" for="subfolder-format">{$t('settings.output.subfolderFormat')}</label>
 			<input
 				id="subfolder-format"
 				type="text"
@@ -95,40 +97,40 @@
 						.filter((s) => s.length > 0);
 				}}
 				class={inputClass}
-				placeholder="Leave empty for no subfolders"
+				placeholder={$t('settings.output.subfolderPlaceholder')}
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Comma-separated list of subfolder names or templates
+				{$t('settings.output.subfolderFormatHint')}
 			</p>
 		</div>
 
 		<div class="space-y-3">
-			<h3 class="font-medium">Download Options</h3>
+			<h3 class="font-medium">{$t('settings.output.downloadOptions')}</h3>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_poster} class="rounded" />
-				<span>Download Poster</span>
+				<span>{$t('settings.output.downloadPoster')}</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_cover} class="rounded" />
-				<span>Download Cover</span>
+				<span>{$t('settings.output.downloadCover')}</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_extrafanart} class="rounded" />
-				<span>Download Extrafanart</span>
+				<span>{$t('settings.output.downloadExtrafanart')}</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_trailer} class="rounded" />
-				<span>Download Trailer</span>
+				<span>{$t('settings.output.downloadTrailer')}</span>
 			</label>
 			<label class="flex items-center gap-2">
 				<input type="checkbox" bind:checked={config.output.download_actress} class="rounded" />
-				<span>Download Actress Images</span>
+				<span>{$t('settings.output.downloadActressImages')}</span>
 			</label>
 		</div>
 
 		<FormNumberInput
-			label="Download timeout"
-			description="Maximum time to wait for image/video downloads to complete"
+			label={$t('settings.output.downloadTimeout')}
+			description={$t('settings.output.downloadTimeoutDesc')}
 			value={config.output.download_timeout ?? 60}
 			min={5}
 			max={600}
@@ -139,7 +141,7 @@
 		/>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="folder-format">Folder Naming Template</label>
+			<label class="block text-sm font-medium mb-2" for="folder-format">{$t('settings.output.folderFormat')}</label>
 			<input
 				id="folder-format"
 				type="text"
@@ -148,17 +150,17 @@
 				placeholder="<ID> - <TITLE>"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Available tags: &lt;ID&gt;, &lt;TITLE&gt;, &lt;STUDIO&gt;, &lt;YEAR&gt;, &lt;ACTRESS&gt;, &lt;ACTRESSES&gt;, &lt;ACTORNAME&gt;
+				{$t('settings.output.folderFormatHint')}
 			</p>
 			{#if !config.output.folder_format}
 				<p class="text-xs text-primary mt-1">
-					No folder template — Organize mode will not create movie subfolders. When destination matches source, Rename file only mode is used automatically.
+					{$t('settings.output.folderFormatEmptyHint')}
 				</p>
 			{/if}
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="file-format">File Naming Template</label>
+			<label class="block text-sm font-medium mb-2" for="file-format">{$t('settings.output.fileFormat')}</label>
 			<input
 				id="file-format"
 				type="text"
@@ -167,17 +169,17 @@
 				placeholder="<ID><PARTSUFFIX>"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Multi-part support: &lt;PART&gt; (part number), &lt;PARTSUFFIX&gt; (original suffix), &lt;IF:MULTIPART&gt;...&lt;/IF&gt;
+				{$t('settings.output.fileFormatHint1')}
 			</p>
 			<p class="text-xs text-muted-foreground">
-				Examples: &lt;ID&gt;&lt;PARTSUFFIX&gt; or &lt;ID&gt;-CD&lt;PART:2&gt; or &lt;ID&gt;&lt;IF:MULTIPART&gt;-pt&lt;PART&gt;&lt;/IF&gt;
+				{$t('settings.output.fileFormatHint2')}
 			</p>
 		</div>
 
-		<SettingsSubsection title="Media File Naming">
+		<SettingsSubsection title={$t('settings.output.mediaFileNaming')}>
 			<FormTemplateInput
-				label="Poster format"
-				description="Naming template for poster images"
+				label={$t('settings.output.posterFormat')}
+				description={$t('settings.output.posterFormatDesc')}
 				value={config.output.poster_format ?? '<ID>-poster.jpg'}
 				placeholder="<ID>-poster.jpg"
 				showTagList={true}
@@ -187,8 +189,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Fanart format"
-				description="Naming template for fanart/cover images"
+				label={$t('settings.output.fanartFormat')}
+				description={$t('settings.output.fanartFormatDesc')}
 				value={config.output.fanart_format ?? '<ID>-fanart.jpg'}
 				placeholder="<ID>-fanart.jpg"
 				onchange={(val) => {
@@ -197,8 +199,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Trailer format"
-				description="Naming template for trailer videos"
+				label={$t('settings.output.trailerFormat')}
+				description={$t('settings.output.trailerFormatDesc')}
 				value={config.output.trailer_format ?? '<ID>-trailer.mp4'}
 				placeholder="<ID>-trailer.mp4"
 				onchange={(val) => {
@@ -207,8 +209,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Screenshot format"
-				description="Naming template for screenshot images"
+				label={$t('settings.output.screenshotFormat')}
+				description={$t('settings.output.screenshotFormatDesc')}
 				value={config.output.screenshot_format ?? 'fanart'}
 				placeholder="fanart"
 				onchange={(val) => {
@@ -217,8 +219,8 @@
 			/>
 
 			<FormTextInput
-				label="Screenshot folder"
-				description="Folder name for storing screenshot images"
+				label={$t('settings.output.screenshotFolder')}
+				description={$t('settings.output.screenshotFolderDesc')}
 				value={config.output.screenshot_folder ?? 'extrafanart'}
 				placeholder="extrafanart"
 				onchange={(val) => {
@@ -227,8 +229,8 @@
 			/>
 
 			<FormNumberInput
-				label="Screenshot padding"
-				description="Zero-padding for screenshot numbers (e.g., 01, 02, 03)"
+				label={$t('settings.output.screenshotPadding')}
+				description={$t('settings.output.screenshotPaddingDesc')}
 				value={config.output.screenshot_padding ?? 1}
 				min={1}
 				max={5}
@@ -239,8 +241,8 @@
 			/>
 
 			<FormTextInput
-				label="Actress folder"
-				description="Folder name for storing actress images"
+				label={$t('settings.output.actressFolder')}
+				description={$t('settings.output.actressFolderDesc')}
 				value={config.output.actress_folder ?? '.actors'}
 				placeholder=".actors"
 				onchange={(val) => {
@@ -249,8 +251,8 @@
 			/>
 
 			<FormTemplateInput
-				label="Actress format"
-				description="Naming template for actress image files"
+				label={$t('settings.output.actressFormat')}
+				description={$t('settings.output.actressFormatDesc')}
 				value={config.output.actress_format ?? '<ACTORNAME>.jpg'}
 				placeholder="<ACTORNAME>.jpg"
 				onchange={(val) => {

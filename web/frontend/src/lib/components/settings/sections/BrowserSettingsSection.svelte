@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { slide } from 'svelte/transition';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
@@ -15,8 +17,6 @@
 
 	let { config, inputClass, onChange }: Props = $props();
 
-	// Helper to safely get nested value with fallback defaults
-	// These defaults are used for UI display only, not stored as hardcoded config
 	function getBrowserValue<K extends keyof BrowserConfig>(
 		key: K,
 		defaultValue: NonNullable<BrowserConfig[K]>
@@ -24,7 +24,6 @@
 		return (config.scrapers?.browser?.[key] ?? defaultValue) as NonNullable<BrowserConfig[K]>;
 	}
 
-	// Default values for browser config fields (used for UI only, not hardcoded in component)
 	const BROWSER_DEFAULTS: BrowserConfig = {
 		enabled: false,
 		binary_path: '',
@@ -45,15 +44,15 @@
 </script>
 
 <SettingsSection
-	title="Browser Settings"
-	description="Configure browser automation for scrapers that require JavaScript rendering. Browser must be enabled both globally here and per-scraper in Scraper Settings."
+	title={$t('settings.browser.title')}
+	description={$t('settings.browser.description')}
 	defaultExpanded={false}
 >
-	<SettingsSubsection title="General">
+	<SettingsSubsection title={$t('settings.browser.general')}>
 		<FormToggle
 			id="browser-enabled"
-			label="Enable Browser Automation"
-			description="Master switch for browser automation. When disabled, all scrapers will use direct HTTP requests even if they have 'Use Browser' enabled."
+			label={$t('settings.browser.enableBrowser')}
+			description={$t('settings.browser.enableBrowserDesc')}
 			checked={getBrowserValue('enabled', BROWSER_DEFAULTS.enabled)}
 			onchange={(val) => onChange('scrapers.browser.enabled', val)}
 		/>
@@ -61,12 +60,12 @@
 
 	{#if browserEnabled}
 		<div transition:slide={{ duration: 200 }}>
-			<SettingsSubsection title="Browser Configuration">
+			<SettingsSubsection title={$t('settings.browser.browserConfig')}>
 				<fieldset class="space-y-0">
 					<FormTextInput
 						id="browser-binary-path"
-						label="Browser Binary Path"
-						description="Path to Chrome/Chromium executable. Leave empty for auto-discovery on macOS, Linux, or Windows."
+						label={$t('settings.browser.binaryPath')}
+						description={$t('settings.browser.binaryPathDesc')}
 						value={getBrowserValue('binary_path', '')}
 						placeholder="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
 						onchange={(val) => onChange('scrapers.browser.binary_path', val)}
@@ -75,8 +74,8 @@
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4 py-4 border-b border-border">
 						<FormNumberInput
 							id="browser-timeout"
-							label="Operation Timeout"
-							description="Maximum time to wait for browser operations"
+							label={$t('settings.browser.operationTimeout')}
+							description={$t('settings.browser.operationTimeoutDesc')}
 							value={getBrowserValue('timeout', BROWSER_DEFAULTS.timeout)}
 							min={1}
 							max={300}
@@ -85,8 +84,8 @@
 						/>
 						<FormNumberInput
 							id="browser-max-retries"
-							label="Max Retries"
-							description="Retry attempts for failed browser operations"
+							label={$t('settings.browser.maxRetries')}
+							description={$t('settings.browser.maxRetriesDesc')}
 							value={getBrowserValue('max_retries', BROWSER_DEFAULTS.max_retries)}
 							min={0}
 							max={10}
@@ -97,8 +96,8 @@
 					<div class="grid grid-cols-1 md:grid-cols-2 gap-4 py-4 border-b border-border">
 						<FormNumberInput
 							id="browser-window-width"
-							label="Window Width"
-							description="Browser viewport width in pixels"
+							label={$t('settings.browser.windowWidth')}
+							description={$t('settings.browser.windowWidthDesc')}
 							value={getBrowserValue('window_width', BROWSER_DEFAULTS.window_width)}
 							min={640}
 							max={3840}
@@ -107,8 +106,8 @@
 						/>
 						<FormNumberInput
 							id="browser-window-height"
-							label="Window Height"
-							description="Browser viewport height in pixels"
+							label={$t('settings.browser.windowHeight')}
+							description={$t('settings.browser.windowHeightDesc')}
 							value={getBrowserValue('window_height', BROWSER_DEFAULTS.window_height)}
 							min={480}
 							max={2160}
@@ -119,8 +118,8 @@
 
 					<FormTextInput
 						id="browser-user-agent"
-						label="User Agent Override"
-						description="Custom User-Agent string for browser (empty = use scraper's User-Agent)"
+						label={$t('settings.browser.userAgentOverride')}
+						description={$t('settings.browser.userAgentOverrideDesc')}
 						value={getBrowserValue('user_agent', '')}
 						placeholder="Mozilla/5.0..."
 						onchange={(val) => onChange('scrapers.browser.user_agent', val)}
@@ -128,45 +127,45 @@
 				</fieldset>
 			</SettingsSubsection>
 
-			<SettingsSubsection title="Performance Options">
+			<SettingsSubsection title={$t('settings.browser.performance')}>
 				<fieldset class="space-y-0">
 					<FormToggle
 						id="browser-headless"
-						label="Headless Mode"
-						description="Run browser without visible window (faster, uses less resources)"
+						label={$t('settings.browser.headless')}
+						description={$t('settings.browser.headlessDesc')}
 						checked={getBrowserValue('headless', BROWSER_DEFAULTS.headless)}
 						onchange={(val) => onChange('scrapers.browser.headless', val)}
 					/>
 					<FormToggle
 						id="browser-stealth-mode"
-						label="Stealth Mode"
-						description="Enable anti-detection measures to avoid being blocked by websites"
+						label={$t('settings.browser.stealth')}
+						description={$t('settings.browser.stealthDesc')}
 						checked={getBrowserValue('stealth_mode', BROWSER_DEFAULTS.stealth_mode)}
 						onchange={(val) => onChange('scrapers.browser.stealth_mode', val)}
 					/>
 					<FormToggle
 						id="browser-block-images"
-						label="Block Images"
-						description="Block image loading for faster page loads"
+						label={$t('settings.browser.blockImages')}
+						description={$t('settings.browser.blockImagesDesc')}
 						checked={getBrowserValue('block_images', BROWSER_DEFAULTS.block_images)}
 						onchange={(val) => onChange('scrapers.browser.block_images', val)}
 					/>
 					<FormToggle
 						id="browser-block-css"
-						label="Block CSS"
-						description="Block CSS loading (may break some sites)"
+						label={$t('settings.browser.blockCss')}
+						description={$t('settings.browser.blockCssDesc')}
 						checked={getBrowserValue('block_css', BROWSER_DEFAULTS.block_css)}
 						onchange={(val) => onChange('scrapers.browser.block_css', val)}
 					/>
 				</fieldset>
 			</SettingsSubsection>
 
-			<SettingsSubsection title="Debug Options">
+			<SettingsSubsection title={$t('settings.browser.debug')}>
 				<fieldset class="space-y-0">
 					<FormNumberInput
 						id="browser-slow-mo"
-						label="Slow Motion Delay"
-						description="Add delay between actions for debugging (0 = disabled)"
+						label={$t('settings.browser.slowMo')}
+						description={$t('settings.browser.slowMoDesc')}
 						value={getBrowserValue('slow_mo', BROWSER_DEFAULTS.slow_mo)}
 						min={0}
 						max={5000}
@@ -175,8 +174,8 @@
 					/>
 					<FormToggle
 						id="browser-debug-visible"
-						label="Debug Visible"
-						description="Show browser window for debugging (overrides headless mode)"
+						label={$t('settings.browser.debugVisible')}
+						description={$t('settings.browser.debugVisibleDesc')}
 						checked={getBrowserValue('debug_visible', BROWSER_DEFAULTS.debug_visible)}
 						onchange={(val) => onChange('scrapers.browser.debug_visible', val)}
 					/>

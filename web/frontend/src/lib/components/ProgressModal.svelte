@@ -13,6 +13,8 @@
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import type { BatchJobResponse, FileResult } from '$lib/api/types';
 	import { X, CircleCheckBig, CircleX, ChevronDown, ChevronRight } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 
@@ -214,7 +216,7 @@
 		<!-- Content -->
 		<div class="flex-1 overflow-y-auto p-6 space-y-5">
 			{#if loading}
-				<p class="text-sm text-muted-foreground text-center py-6">Loading job status...</p>
+				<p class="text-sm text-muted-foreground text-center py-6">{$t('common.loading')}</p>
 			{:else if error}
 				<div class="bg-destructive/10 border border-destructive text-destructive px-4 py-3 rounded">
 					<p>{error}</p>
@@ -225,7 +227,7 @@
 					<div class="flex items-center justify-between text-sm">
 						<span class="font-medium">Overall Progress</span>
 						<span class="text-muted-foreground">
-							{displayFinished} / {displayTotal} files
+							{displayFinished} / {displayTotal} {$t('jobs.fileCount', { values: { count: displayTotal } })}
 						</span>
 					</div>
 					<div class="h-3 bg-secondary rounded-full overflow-hidden">
@@ -286,9 +288,7 @@
 							class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent/50 transition-colors"
 						>
 							<CircleCheckBig class="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
-							<span class="text-sm font-medium text-green-700 dark:text-green-300">
-								{completedFiles.length} completed
-							</span>
+							<span>{completedFiles.length} {$t('bgJob.completed')}</span>
 							{#if showCompleted}
 								<ChevronDown class="h-4 w-4 text-green-600 dark:text-green-400 ml-auto" />
 							{:else}
@@ -300,7 +300,7 @@
 								{#each completedFiles as result (result.file_path)}
 									<div animate:flip={{ duration: 180, easing: cubicOut }} class="flex items-center gap-3 px-3 py-1.5 text-sm">
 										<CircleCheckBig class="h-3.5 w-3.5 text-green-600 dark:text-green-400 shrink-0" />
-										<span class="truncate text-green-900 dark:text-green-200">{result.movie_id || 'Unknown'}</span>
+										<span class="truncate text-green-900 dark:text-green-200">{result.movie_id || $t('actressEditor.unknown')}</span>
 										<span class="text-xs text-green-700/50 dark:text-green-300/50 truncate">{getFileDisplayName(result.file_path)}</span>
 									</div>
 								{/each}
@@ -315,9 +315,7 @@
 							class="w-full flex items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent/50 transition-colors"
 						>
 							<CircleX class="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
-							<span class="text-sm font-medium text-red-700 dark:text-red-300">
-								{failedFiles.length} failed
-							</span>
+							<span>{failedFiles.length} {$t('bgJob.failed')}</span>
 							{#if showFailed}
 								<ChevronDown class="h-4 w-4 text-red-600 dark:text-red-400 ml-auto" />
 							{:else}
@@ -331,7 +329,7 @@
 										<CircleX class="h-3.5 w-3.5 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
 										<div class="flex-1 min-w-0">
 											<div class="flex items-center gap-2">
-												<span class="truncate text-red-900 dark:text-red-200">{result.movie_id || 'Unknown'}</span>
+												<span class="truncate text-red-900 dark:text-red-200">{result.movie_id || $t('actressEditor.unknown')}</span>
 												<span class="text-xs text-red-700/50 dark:text-red-300/50 truncate">{getFileDisplayName(result.file_path)}</span>
 											</div>
 											{#if result.error}

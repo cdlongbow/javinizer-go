@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import type { SettingsConfig } from '$lib/api/types';
@@ -37,28 +39,28 @@
 	});
 </script>
 
-<SettingsSection title="Logging Settings" description="Configure logging level, format, and output destination" defaultExpanded={false}>
+<SettingsSection title={$t('settings.logging.title')} description={$t('settings.logging.description')} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div>
-			<label class="block text-sm font-medium mb-2" for="log-level">Log Level</label>
+			<label class="block text-sm font-medium mb-2" for="log-level">{$t('settings.logging.level')}</label>
 			<select id="log-level" bind:value={logging.level} class={inputClass}>
-				<option value="debug">Debug</option>
-				<option value="info">Info</option>
-				<option value="warn">Warning</option>
-				<option value="error">Error</option>
+				<option value="debug">{$t('settings.logging.levelDebug')}</option>
+				<option value="info">{$t('settings.logging.levelInfo')}</option>
+				<option value="warn">{$t('settings.logging.levelWarning')}</option>
+				<option value="error">{$t('settings.logging.levelError')}</option>
 			</select>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="log-format">Log Format</label>
+			<label class="block text-sm font-medium mb-2" for="log-format">{$t('settings.logging.format')}</label>
 			<select id="log-format" bind:value={logging.format} class={inputClass}>
-				<option value="text">Text</option>
-				<option value="json">JSON</option>
+				<option value="text">{$t('settings.logging.formatText')}</option>
+				<option value="json">{$t('settings.logging.formatJson')}</option>
 			</select>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="log-output">Log Output</label>
+			<label class="block text-sm font-medium mb-2" for="log-output">{$t('settings.logging.output')}</label>
 			<input
 				id="log-output"
 				type="text"
@@ -67,14 +69,14 @@
 				placeholder="stdout or file path"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Use "stdout" for console, file path, or comma-separated (e.g., "stdout,data/logs/javinizer.log")
+				{$t('settings.logging.outputHint')}
 			</p>
 		</div>
 
-		<SettingsSubsection title="Log Rotation" description="Automatically rotate log files when they grow too large">
+		<SettingsSubsection title={$t('settings.logging.rotationTitle')} description={$t('settings.logging.rotationDesc')}>
 			<div class="space-y-4">
 				<div>
-					<label class="block text-sm font-medium mb-2" for="log-max-size">Max Size (MB)</label>
+					<label class="block text-sm font-medium mb-2" for="log-max-size">{$t('settings.logging.maxSize')}</label>
 					<input
 						id="log-max-size"
 						type="number"
@@ -85,12 +87,12 @@
 						placeholder="10"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Maximum file size before rotation (0 = disabled)
+						{$t('settings.logging.maxSizeHint')}
 					</p>
 				</div>
 
 				<div>
-					<label class="block text-sm font-medium mb-2" for="log-max-backups">Max Backups</label>
+					<label class="block text-sm font-medium mb-2" for="log-max-backups">{$t('settings.logging.maxBackups')}</label>
 					<input
 						id="log-max-backups"
 						type="number"
@@ -101,12 +103,12 @@
 						placeholder="5"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Number of old log files to keep (0 = unlimited)
+						{$t('settings.logging.maxBackupsHint')}
 					</p>
 				</div>
 
 				<div>
-					<label class="block text-sm font-medium mb-2" for="log-max-age">Max Age (days)</label>
+					<label class="block text-sm font-medium mb-2" for="log-max-age">{$t('settings.logging.maxAge')}</label>
 					<input
 						id="log-max-age"
 						type="number"
@@ -117,7 +119,7 @@
 						placeholder="0"
 					/>
 					<p class="text-xs text-muted-foreground mt-1">
-						Maximum age in days to keep log files (0 = no limit)
+						{$t('settings.logging.maxAgeHint')}
 					</p>
 				</div>
 
@@ -128,7 +130,7 @@
 						bind:checked={logging.compress}
 						class="w-4 h-4"
 					/>
-					<label class="text-sm font-medium" for="log-compress">Compress rotated files</label>
+					<label class="text-sm font-medium" for="log-compress">{$t('settings.logging.compress')}</label>
 				</div>
 			</div>
 		</SettingsSubsection>

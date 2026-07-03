@@ -7,9 +7,11 @@
 	import Button from './ui/Button.svelte';
 	import Card from './ui/Card.svelte';
 	import ImageViewer from './ImageViewer.svelte';
-import { tooltip } from '$lib/actions/tooltip';
+	import { tooltip } from '$lib/actions/tooltip';
 	import VideoModal from './VideoModal.svelte';
 	import { Plus, Trash2, Image as ImageIcon, ImagePlus, Play, RotateCcw, Info, ChevronDown } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		movie: Movie;
@@ -181,9 +183,9 @@ import { tooltip } from '$lib/actions/tooltip';
 		if (!source) return null;
 
 		const normalized = source.toLowerCase();
-		if (normalized === 'nfo') return 'via NFO';
-		if (normalized === 'merged') return 'via merged data';
-		if (normalized === 'empty') return 'empty';
+		if (normalized === 'nfo') return $t('movieEditor.sourceViaNfo');
+		if (normalized === 'merged') return $t('movieEditor.sourceViaMerged');
+		if (normalized === 'empty') return $t('movieEditor.sourceEmpty');
 		return `via ${source}`;
 	}
 </script>
@@ -192,7 +194,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	<!-- Poster Image -->
 	<div>
 		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-			<span>Poster Image</span>
+			<span>{$t('review.sidebar.poster')}</span>
 			{#if sourceText('poster_url')}
 				<span class="text-xs font-normal text-muted-foreground">{sourceText('poster_url')}</span>
 			{/if}
@@ -200,7 +202,7 @@ import { tooltip } from '$lib/actions/tooltip';
 		<div class="space-y-3">
 			<div>
 				<label for="poster-url" class="text-sm font-medium mb-1 block">
-					Poster URL
+					{$t('review.sidebar.poster')}
 					{#if sourceText('poster_url')}
 						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('poster_url')}</span>
 					{/if}
@@ -216,7 +218,7 @@ import { tooltip } from '$lib/actions/tooltip';
 			</div>
 			<div>
 				<div class="text-sm font-medium mb-1 block">
-					Preview{movie.should_crop_poster ? ' (Cropped)' : ''}
+					{$t('actressEditor.preview')}{movie.should_crop_poster ? $t('review.sidebar.posterCropped') : ''}
 				</div>
 				{#if displayPosterUrl || posterUrl}
 					<div class="w-full max-w-xs aspect-2/3 overflow-hidden rounded border relative">
@@ -246,7 +248,7 @@ import { tooltip } from '$lib/actions/tooltip';
 					>
 						<div class="text-center">
 							<ImageIcon class="h-12 w-12 mx-auto mb-2 opacity-50" />
-							<p class="text-sm">No poster</p>
+							<p class="text-sm">{$t('review.sidebar.noPoster')}</p>
 						</div>
 					</div>
 				{/if}
@@ -257,7 +259,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	<!-- Cover/Fanart Image -->
 	<div>
 		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-			<span>Cover/Fanart Image</span>
+			<span>{$t('review.sidebar.cover')}</span>
 			{#if sourceText('cover_url')}
 				<span class="text-xs font-normal text-muted-foreground">{sourceText('cover_url')}</span>
 			{/if}
@@ -265,7 +267,7 @@ import { tooltip } from '$lib/actions/tooltip';
 		<div class="space-y-3">
 			<div>
 				<label for="cover-url" class="text-sm font-medium mb-1 block">
-					Cover URL
+					{$t('review.sidebar.cover')}
 					{#if sourceText('cover_url')}
 						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('cover_url')}</span>
 					{/if}
@@ -299,7 +301,7 @@ import { tooltip } from '$lib/actions/tooltip';
 					>
 						<div class="text-center">
 							<ImageIcon class="h-12 w-12 mx-auto mb-2 opacity-50" />
-							<p class="text-sm">No cover image</p>
+							<p class="text-sm">{$t('review.sidebar.noCover')}</p>
 						</div>
 					</div>
 				{/if}
@@ -310,7 +312,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	<!-- Trailer -->
 	<div>
 		<h3 class="text-lg font-semibold mb-3 flex items-center gap-2">
-			<span>Trailer</span>
+			<span>{$t('review.sidebar.trailer')}</span>
 			{#if sourceText('trailer_url')}
 				<span class="text-xs font-normal text-muted-foreground">{sourceText('trailer_url')}</span>
 			{/if}
@@ -318,7 +320,7 @@ import { tooltip } from '$lib/actions/tooltip';
 		<div class="space-y-3">
 			<div>
 				<label for="trailer-url" class="text-sm font-medium mb-1 block">
-					Trailer URL
+					{$t('review.sidebar.trailer')}
 					{#if sourceText('trailer_url')}
 						<span class="text-xs font-normal text-muted-foreground ml-2">{sourceText('trailer_url')}</span>
 					{/if}
@@ -341,7 +343,7 @@ import { tooltip } from '$lib/actions/tooltip';
 					>
 						<div class="text-center">
 							<Play class="h-12 w-12 mx-auto mb-2" />
-							<p class="text-sm font-medium">Play Trailer</p>
+							<p class="text-sm font-medium">{$t('review.sidebar.playTrailer')}</p>
 						</div>
 					</button>
 				{:else}
@@ -362,7 +364,7 @@ import { tooltip } from '$lib/actions/tooltip';
 	<div>
 		<div class="flex items-center justify-between mb-3">
 			<h3 class="text-lg font-semibold flex items-center gap-2">
-				<span>Screenshots ({screenshots.length})</span>
+				<span>{$t('review.sidebar.screenshots', { values: { count: screenshots.length } })}</span>
 				{#if sourceText('screenshot_urls')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('screenshot_urls')}</span>
 				{/if}
@@ -435,7 +437,7 @@ import { tooltip } from '$lib/actions/tooltip';
 						>
 							<img
 								src={previewImageURL(url)}
-								alt="Screenshot {index + 1}"
+								alt="{$t('review.sidebar.screenshots', { values: { count: index + 1 } })}"
 								class="w-full aspect-video object-cover rounded" hidden={screenshotErrors.has(url)}
 								onerror={() => { screenshotErrors = new Set([...screenshotErrors, url]); }}
 							/>

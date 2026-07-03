@@ -3,6 +3,8 @@
 	import { flip } from 'svelte/animate';
 	import { quintOut } from 'svelte/easing';
 	import { fade, scale } from 'svelte/transition';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import { alertDialog, confirmDialog } from '$lib/stores/dialog.svelte';
 	import { portalToBody } from '$lib/actions/portal';
 	import { apiClient } from '$lib/api/client';
@@ -189,7 +191,7 @@
 		if (actress.first_name) {
 			return actress.first_name;
 		}
-		return actress.japanese_name || 'Unknown';
+		return actress.japanese_name || $t('actressEditor.unknown');
 	}
 
 	function notifyParent() {
@@ -220,7 +222,7 @@
 
 	function saveActress() {
 		if (!editingActress.first_name?.trim() && !editingActress.japanese_name?.trim()) {
-			void alertDialog('Validation Error', 'At least first name or Japanese name is required');
+			void alertDialog($t('actressEditor.validationError'), $t('actressEditor.validationRequired'));
 			return;
 		}
 
@@ -236,7 +238,7 @@
 	}
 
 	async function removeActress(index: number) {
-		if (await confirmDialog('Remove Actress', 'Remove this actress?', { variant: 'danger', confirmLabel: 'Remove' })) {
+		if (await confirmDialog($t('actressEditor.remove'), $t('actressEditor.removeConfirm'), { variant: 'danger', confirmLabel: $t('actressEditor.remove') })) {
 			actresses = actresses.filter((_, i) => i !== index);
 			notifyParent();
 		}
@@ -299,9 +301,9 @@
 		if (!source) return null;
 
 		const normalized = source.toLowerCase();
-		if (normalized === 'nfo') return 'via NFO';
-		if (normalized === 'merged') return 'via merged data';
-		if (normalized === 'empty') return 'empty';
+		if (normalized === 'nfo') return $t('movieEditor.sourceViaNfo');
+		if (normalized === 'merged') return $t('movieEditor.sourceViaMerged');
+		if (normalized === 'empty') return $t('movieEditor.sourceEmpty');
 		return `via ${source}`;
 	}
 
@@ -331,22 +333,22 @@
 
 <div class="space-y-4">
 	<div class="flex items-center justify-between">
-		<h3 class="text-lg font-semibold">Actresses ({actresses.length})</h3>
+		<h3 class="text-lg font-semibold">{$t('actressEditor.title', { values: { count: actresses.length } })}</h3>
 		<Button onclick={openAddActress} size="sm" disabled={savingEdits || organizing}>
 			{#snippet children()}
 				<Plus class="h-4 w-4 mr-2" />
-				Add Actress
+				{$t('actressEditor.addActress')}
 			{/snippet}
 		</Button>
 	</div>
 
 	{#if actresses.length === 0}
 		<div class="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
-			<p>No actresses added</p>
+			<p>{$t('actressEditor.noActresses')}</p>
 			<Button onclick={openAddActress} size="sm" class="mt-2" disabled={savingEdits || organizing}>
 				{#snippet children()}
 					<Plus class="h-4 w-4 mr-2" />
-					Add First Actress
+					{$t('actressEditor.addFirstActress')}
 				{/snippet}
 			</Button>
 		</div>
@@ -363,14 +365,14 @@
 								class="w-full aspect-2/3 object-cover rounded"
 								onerror={(e) => {
 									(e.currentTarget as HTMLImageElement).src =
-										"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300' fill='%23374151'%3E%3Crect width='200' height='300'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%239CA3AF' font-family='system-ui' font-size='14'%3ENo Image%3C/text%3E%3C/svg%3E";
+										"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='300' fill='%23374151'%3E%3Crect width='200' height='300'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%239CA3AF' font-family='system-ui' font-size='14'%3E{$t('actressEditor.noImage')}%3C/text%3E%3C/svg%3E";
 								}}
 							/>
 						{:else}
 							<div
 								class="w-full aspect-2/3 bg-accent rounded flex items-center justify-center text-xs text-muted-foreground"
 							>
-								No Image
+								{$t('actressEditor.noImage')}
 							</div>
 						{/if}
 
@@ -421,7 +423,7 @@
 			<!-- Header -->
 			<div class="p-6 border-b flex items-center justify-between">
 				<h2 class="text-xl font-bold">
-					{editingIndex !== null ? 'Edit Actress' : 'Add Actress'}
+					{editingIndex !== null ? $t('actressEditor.editTitle') : $t('actressEditor.addTitle')}
 				</h2>
 				<Button variant="ghost" size="icon" onclick={cancelEdit}>
 					{#snippet children()}
@@ -436,7 +438,7 @@
 				<div class="space-y-2">
 					<label class="text-sm font-medium flex items-center gap-2">
 						<Search class="h-4 w-4" />
-						Select or Search Actress
+						{$t('actressEditor.searchLabel')}
 					</label>
 					<div class="relative">
 						<input
@@ -445,7 +447,7 @@
 							onfocus={handleSearchFocus}
 							onblur={handleSearchBlur}
 							oninput={handleSearchInput}
-							placeholder="Type to search actresses..."
+							placeholder="{$t('actressEditor.searchPlaceholder')}"
 							class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 						/>
 
@@ -466,7 +468,7 @@
 												/>
 											{:else}
 												<div class="w-12 h-16 bg-accent rounded flex items-center justify-center text-xs">
-													No Img
+													{$t('actressEditor.noThumbnail')}
 												</div>
 											{/if}
 											<div class="flex-1">
@@ -480,17 +482,17 @@
 								</div>
 							{:else if searchQuery.trim().length === 0}
 								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
-									No actresses in database yet
+									{$t('actressEditor.noActressesDb')}
 								</div>
 							{:else}
 								<div class="absolute z-10 w-full mt-1 bg-background border rounded-md shadow-lg p-3 text-sm text-muted-foreground text-center">
-									No matches found
+									{$t('actressEditor.noMatches')}
 								</div>
 							{/if}
 						{/if}
 					</div>
 					<p class="text-xs text-muted-foreground">
-						Type to search actresses or enter details manually below
+						{$t('actressEditor.searchHint')}
 					</p>
 				</div>
 
@@ -499,7 +501,7 @@
 						<div class="w-full border-t"></div>
 					</div>
 					<div class="relative flex justify-center text-xs uppercase">
-						<span class="bg-background px-2 text-muted-foreground">Or enter manually</span>
+						<span class="bg-background px-2 text-muted-foreground">{$t('actressEditor.orEnterManually')}</span>
 					</div>
 				</div>
 
@@ -507,40 +509,40 @@
 					<!-- Left: Form -->
 					<div class="space-y-4">
 						<div>
-							<label class="text-sm font-medium mb-1 block" for="actress-first-name">First Name</label>
+							<label class="text-sm font-medium mb-1 block" for="actress-first-name">{$t('actressEditor.firstName')}</label>
 							<input
 								id="actress-first-name"
 								type="text"
 								bind:value={editingActress.first_name}
-								placeholder="e.g., Yume"
+								placeholder="{$t('actressEditor.firstNamePlaceholder')}"
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 						</div>
 
 						<div>
-							<label class="text-sm font-medium mb-1 block" for="actress-last-name">Last Name</label>
+							<label class="text-sm font-medium mb-1 block" for="actress-last-name">{$t('actressEditor.lastName')}</label>
 							<input
 								id="actress-last-name"
 								type="text"
 								bind:value={editingActress.last_name}
-								placeholder="e.g., Nishimiya"
+								placeholder="{$t('actressEditor.lastNamePlaceholder')}"
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 						</div>
 
 						<div>
-							<label class="text-sm font-medium mb-1 block" for="actress-japanese-name">Japanese Name</label>
+							<label class="text-sm font-medium mb-1 block" for="actress-japanese-name">{$t('actressEditor.japaneseName')}</label>
 							<input
 								id="actress-japanese-name"
 								type="text"
 								bind:value={editingActress.japanese_name}
-								placeholder="e.g., 西宮ゆめ"
+								placeholder="{$t('actressEditor.japaneseNamePlaceholder')}"
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all"
 							/>
 							{#if aliasGroupFetching}
-								<p class="mt-1 text-xs text-muted-foreground">Checking known aliases…</p>
+								<p class="mt-1 text-xs text-muted-foreground">{$t('actressEditor.checkingAliases')}</p>
 							{:else if aliasGroup}
-								<label class="mt-2 text-xs font-medium block" for="actress-nfo-name">Write to NFO as</label>
+								<label class="mt-2 text-xs font-medium block" for="actress-nfo-name">{$t('actressEditor.writeToNfo')}</label>
 								<select
 									id="actress-nfo-name"
 									value={editingActress.japanese_name}
@@ -548,25 +550,25 @@
 										editingActress.japanese_name = (event.currentTarget as HTMLSelectElement).value;
 									}}
 									class="mt-1 w-full px-3 py-2 border rounded-md bg-background text-sm focus:ring-2 focus:ring-primary focus:border-primary transition-all"
-									title="This actress has multiple known names; pick the one to write to the NFO"
+									title="{$t('actressEditor.aliasSelectTitle')}"
 								>
 								{#each aliasGroup.names as name}
-										<option value={name}>{name}{name === aliasGroup.canonical ? ' (canonical)' : ''}</option>
+										<option value={name}>{name}{name === aliasGroup.canonical ? $t('actressEditor.canonicalLabel') : ''}</option>
 									{/each}
 								</select>
 								<p class="mt-1 text-xs text-muted-foreground">
-									{aliasGroup.names.length} known names for this performer. Selected name is written to the NFO &lt;name&gt; tag.
+									{aliasGroup.names.length} {$t('actressEditor.aliasHint')}
 								</p>
 							{/if}
 						</div>
 
 						<div>
-							<label class="text-sm font-medium mb-1 block" for="actress-thumb-url">Thumbnail URL</label>
+							<label class="text-sm font-medium mb-1 block" for="actress-thumb-url">{$t('actressEditor.thumbnailUrl')}</label>
 							<input
 								id="actress-thumb-url"
 								type="url"
 								bind:value={editingActress.thumb_url}
-								placeholder="https://..."
+								placeholder="{$t('actressEditor.thumbnailPlaceholder')}"
 								class="w-full px-3 py-2 border rounded-md bg-background focus:ring-2 focus:ring-primary focus:border-primary transition-all font-mono text-sm"
 							/>
 						</div>
@@ -574,7 +576,7 @@
 
 					<!-- Right: Preview -->
 					<div>
-						<span class="text-sm font-medium mb-1 block">Preview</span>
+						<span class="text-sm font-medium mb-1 block">{$t('actressEditor.preview')}</span>
 						<Card class="p-3">
 							<!-- Preview hides via {#if}+thumbPreviewError (unmounts the element),
 							     not the HTML [hidden] attr. If changed to hidden=, avoid Tailwind
@@ -590,11 +592,11 @@
 								<div
 									class="w-full aspect-2/3 bg-accent rounded flex items-center justify-center text-sm text-muted-foreground mb-2"
 								>
-									{thumbPreviewSrc ? 'Unable to load image' : 'No Thumbnail'}
+									{thumbPreviewSrc ? $t('actressEditor.unableToLoadImage') : $t('actressEditor.noThumbnail')}
 								</div>
 							{/if}
 							<p class="font-medium text-sm truncate">
-								{getFullName(editingActress) || 'Name'}
+								{getFullName(editingActress) || $t('actressEditor.namePlaceholder')}
 							</p>
 							{#if editingActress.japanese_name}
 								<p class="text-xs text-muted-foreground truncate">
@@ -609,12 +611,12 @@
 			<!-- Footer -->
 			<div class="p-6 border-t flex items-center justify-end gap-3">
 				<Button variant="outline" onclick={cancelEdit}>
-					{#snippet children()}Cancel{/snippet}
+					{#snippet children()}{$t('actressEditor.cancel')}{/snippet}
 				</Button>
 				<Button onclick={saveActress} disabled={savingEdits || organizing}>
 					{#snippet children()}
 						<Save class="h-4 w-4 mr-2" />
-						{editingIndex !== null ? 'Save Changes' : 'Add Actress'}
+						{editingIndex !== null ? $t('actressEditor.saveChanges') : $t('actressEditor.saveNew')}
 					{/snippet}
 				</Button>
 			</div>

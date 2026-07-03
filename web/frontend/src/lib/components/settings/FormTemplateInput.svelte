@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { generateUUID } from '$lib/utils/uuid';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		label: string;
@@ -64,11 +66,11 @@
 				onclick={toggleTags}
 				class="text-xs text-primary hover:underline mt-2"
 			>
-				{showTags ? 'Hide' : 'Show'} available tags
+				{showTags ? $t('formTemplate.hideTags') : $t('formTemplate.showTags')}
 			</button>
 			{#if showTags}
 				<div class="mt-2 p-3 bg-accent/50 rounded-md">
-					<p class="text-xs font-medium text-foreground mb-2">Available Template Tags:</p>
+					<p class="text-xs font-medium text-foreground mb-2">{$t('formTemplate.availableTags')}</p>
 					<div class="flex flex-wrap gap-2">
 						{#each TEMPLATE_TAGS as tag}
 							<code class="text-xs bg-background px-2 py-1 rounded border border-border">{tag}</code>

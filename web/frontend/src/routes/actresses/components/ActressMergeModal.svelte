@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { ActressMergeResolution, ActressMergePreviewResponse } from '$lib/api/types';
@@ -46,8 +48,8 @@
 	<div class="fixed inset-0 z-50 bg-black/50 p-4 flex items-center justify-center">
 		<Card class="w-full max-w-3xl max-h-[90vh] overflow-hidden">
 			<div class="p-4 border-b flex items-center justify-between">
-				<h2 class="text-lg font-semibold">Merge Selected Actresses</h2>
-				<Button variant="outline" size="sm" onclick={onCloseMergeModal}>Close</Button>
+				<h2 class="text-lg font-semibold">{$t('actresses.toolbar.mergeSelected')}</h2>
+				<Button variant="outline" size="sm" onclick={onCloseMergeModal}>{$t('common.close')}</Button>
 			</div>
 
 			<div class="p-4 space-y-4 overflow-auto max-h-[70vh]">

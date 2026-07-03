@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { Movie, Genre } from '$lib/api/types';
 	import { CircleAlert, X, Plus } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		movie: Movie;
@@ -38,9 +40,9 @@
 			if (!source) continue;
 
 			const normalized = source.toLowerCase();
-			if (normalized === 'nfo') return 'via NFO';
-			if (normalized === 'merged') return 'via merged data';
-			if (normalized === 'empty') return 'empty';
+			if (normalized === 'nfo') return $t('movieEditor.sourceViaNfo');
+			if (normalized === 'merged') return $t('movieEditor.sourceViaMerged');
+			if (normalized === 'empty') return $t('movieEditor.sourceEmpty');
 			return `via ${source}`;
 		}
 		return null;
@@ -104,7 +106,7 @@
 		<!-- ID -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Movie ID
+				{$t('movieEditor.movieId')}
 				{#if sourceText('id')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('id')}</span>
 				{/if}
@@ -123,7 +125,7 @@
 		<!-- Content ID -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Content ID
+				{$t('movieEditor.contentId')}
 				{#if sourceText('code')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('code')}</span>
 				{/if}
@@ -142,7 +144,7 @@
 		<!-- Title -->
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Title
+				{$t('movieEditor.title')}
 				{#if sourceText('display_title')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('display_title')}</span>
 				{/if}
@@ -161,7 +163,7 @@
 		<!-- Original Title -->
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Original Title (Japanese)
+				{$t('movieEditor.originalTitle')}
 				{#if sourceText('original_title')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('original_title')}</span>
 				{/if}
@@ -180,7 +182,7 @@
 		<!-- Description -->
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Description
+				{$t('movieEditor.description')}
 				{#if sourceText('description')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('description')}</span>
 				{/if}
@@ -199,7 +201,7 @@
 		<!-- Release Date -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Release Date
+				{$t('movieEditor.releaseDate')}
 				{#if sourceText('release_date')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('release_date')}</span>
 				{/if}
@@ -218,7 +220,7 @@
 		<!-- Runtime -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Runtime (minutes)
+				{$t('movieEditor.runtime')}
 				{#if sourceText('runtime')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('runtime')}</span>
 				{/if}
@@ -238,7 +240,7 @@
 		<!-- Director -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Director
+				{$t('movieEditor.director')}
 				{#if sourceText('director')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('director')}</span>
 				{/if}
@@ -257,7 +259,7 @@
 		<!-- Maker -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Studio / Maker
+				{$t('movieEditor.studioMaker')}
 				{#if sourceText('maker')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('maker')}</span>
 				{/if}
@@ -276,7 +278,7 @@
 		<!-- Label -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Label
+				{$t('movieEditor.label')}
 				{#if sourceText('label')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('label')}</span>
 				{/if}
@@ -295,7 +297,7 @@
 		<!-- Series -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Series
+				{$t('movieEditor.series')}
 				{#if sourceText('series')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('series')}</span>
 				{/if}
@@ -314,7 +316,7 @@
 		<!-- Rating Score -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Rating Score (0-10)
+				{$t('movieEditor.ratingScore')}
 				{#if sourceText('rating_score')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('rating_score')}</span>
 				{/if}
@@ -345,7 +347,7 @@
 		<!-- Rating Votes -->
 		<div>
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Rating Votes
+				{$t('movieEditor.ratingVotes')}
 				{#if sourceText('rating_votes')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('rating_votes')}</span>
 				{/if}
@@ -367,7 +369,7 @@
 		<!-- Genres -->
 		<div class="md:col-span-2">
 			<label class="flex items-center gap-2 text-sm font-medium mb-1">
-				Genres
+				{$t('movieEditor.genres')}
 				{#if sourceText('genres')}
 					<span class="text-xs font-normal text-muted-foreground">{sourceText('genres')}</span>
 				{/if}
@@ -386,7 +388,7 @@
 								type="button"
 								onclick={() => removeGenre(genre.name)}
 								class="ml-0.5 -mr-1 p-0.5 rounded-full hover:bg-primary/20 transition-all opacity-70 hover:opacity-100"
-								title="Remove {genre.name}"
+								title="{$t('common.delete')} {genre.name}"
 							>
 								<X class="h-3.5 w-3.5" />
 							</button>
@@ -400,7 +402,7 @@
 						type="text"
 						bind:value={newGenreInput}
 						onkeydown={handleGenreKeydown}
-						placeholder={editedMovie.genres && editedMovie.genres.length > 0 ? "Add another..." : "Type a genre and press Enter"}
+						placeholder={editedMovie.genres && editedMovie.genres.length > 0 ? $t('movieEditor.genresAddAnother') : $t('movieEditor.genresPlaceholder')}
 						class="flex-1 outline-none bg-transparent text-foreground text-sm min-w-0 placeholder:text-muted-foreground/60"
 					/>
 					{#if newGenreInput.trim()}
@@ -408,7 +410,7 @@
 							type="button"
 							onclick={addGenre}
 							class="p-1.5 rounded-full bg-primary/10 hover:bg-primary/20 text-primary transition-all hover:scale-110"
-							title="Add genre"
+							title="{$t('movieEditor.genresAddAnother')}"
 						>
 							<Plus class="h-3.5 w-3.5" />
 						</button>

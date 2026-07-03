@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
 	import { Plus, Pencil, Save } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
@@ -42,10 +44,10 @@
 			<h2 class="text-lg font-semibold flex items-center gap-2">
 				{#if editingId}
 					<Pencil class="h-5 w-5 text-primary" />
-					Edit Actress
+					{$t('actresses.form.editTitle')}
 				{:else}
 					<Plus class="h-5 w-5 text-muted-foreground" />
-					Create Actress
+					{$t('actresses.form.createTitle')}
 				{/if}
 			</h2>
 			<span
@@ -53,13 +55,13 @@
 					editingId ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground'
 				}`}
 			>
-				{editingId ? 'Edit Mode' : 'Create Mode'}
+				{editingId ? $t('actresses.form.editTitle') : $t('actresses.form.createTitle')}
 			</span>
 		</div>
 		<p class={`text-sm ${editingId ? 'text-primary/90' : 'text-muted-foreground'}`}>
 			{editingId
-				? 'You are editing an existing actress record.'
-				: 'Fill in details to add a new actress record.'}
+				? $t('actresses.form.editDescription')
+				: $t('actresses.form.createDescription')}
 		</p>
 
 		{#if formError}
@@ -70,43 +72,43 @@
 
 		<div class="space-y-3">
 			<div>
-				<label class="text-sm font-medium" for="dmm-id">DMM ID</label>
+				<label class="text-sm font-medium" for="dmm-id">{$t('actresses.form.dmmId')}</label>
 				<input
 					id="dmm-id"
 					type="number"
 					min="0"
 					bind:value={form.dmm_id}
-					placeholder="e.g. 1092662"
+					placeholder="{$t('actresses.form.dmmIdPlaceholder')}"
 					class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 				/>
-				<p class="mt-1 text-xs text-muted-foreground">Optional. Leave blank if unknown.</p>
+				<p class="mt-1 text-xs text-muted-foreground">{$t('actresses.form.dmmIdHint')}</p>
 			</div>
 
 			<div class="grid grid-cols-2 gap-3">
 				<div>
-					<label class="text-sm font-medium" for="first-name">First Name</label>
+					<label class="text-sm font-medium" for="first-name">{$t('actresses.form.firstName')}</label>
 					<input
 						id="first-name"
 						type="text"
 						bind:value={form.first_name}
-						placeholder="Yui"
+						placeholder="{$t('actresses.form.firstNamePlaceholder')}"
 						class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 					/>
 				</div>
 				<div>
-					<label class="text-sm font-medium" for="last-name">Last Name</label>
+					<label class="text-sm font-medium" for="last-name">{$t('actresses.form.lastName')}</label>
 					<input
 						id="last-name"
 						type="text"
 						bind:value={form.last_name}
-						placeholder="Hatano"
+						placeholder="{$t('actresses.form.lastNamePlaceholder')}"
 						class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 					/>
 				</div>
 			</div>
 
 			<div>
-				<label class="text-sm font-medium" for="ja-name">Japanese Name</label>
+				<label class="text-sm font-medium" for="ja-name">{$t('actresses.form.japaneseName')}</label>
 				<input
 					id="ja-name"
 					type="text"
@@ -117,23 +119,23 @@
 			</div>
 
 			<div>
-				<label class="text-sm font-medium" for="thumb-url">Thumbnail URL</label>
+				<label class="text-sm font-medium" for="thumb-url">{$t('actresses.form.thumbnailUrl')}</label>
 				<input
 					id="thumb-url"
 					type="url"
 					bind:value={form.thumb_url}
-					placeholder="https://example.com/actress.jpg"
+					placeholder="{$t('actresses.form.thumbnailPlaceholder')}"
 					class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 				/>
 			</div>
 
 			<div>
-				<label class="text-sm font-medium" for="aliases">Aliases</label>
+				<label class="text-sm font-medium" for="aliases">{$t('actresses.form.aliases')}</label>
 				<input
 					id="aliases"
 					type="text"
 					bind:value={form.aliases}
-					placeholder="Alias1|Alias2"
+					placeholder="{$t('actresses.form.aliasesPlaceholder')}"
 					class="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
 				/>
 			</div>
@@ -142,9 +144,9 @@
 		<div class="flex items-center gap-2 pt-2">
 			<Button onclick={onSave} disabled={isPending}>
 				<Save class="h-4 w-4" />
-				{isPending ? 'Saving...' : editingId ? 'Update' : 'Create'}
+				{isPending ? $t('actresses.form.saving') : editingId ? $t('actresses.form.update') : $t('actresses.form.create')}
 			</Button>
-			<Button variant="outline" onclick={onReset} disabled={isPending}>Clear</Button>
+			<Button variant="outline" onclick={onReset} disabled={isPending}>{$t('actresses.form.clear')}</Button>
 		</div>
 	</Card>
 </div>

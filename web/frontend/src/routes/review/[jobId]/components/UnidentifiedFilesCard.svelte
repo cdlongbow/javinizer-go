@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import { AlertTriangle, Search } from 'lucide-svelte';
 	import type { FileResult } from '$lib/api/types';
 	import Card from '$lib/components/ui/Card.svelte';

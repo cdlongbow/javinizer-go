@@ -3,6 +3,8 @@
 	import { fly } from 'svelte/transition';
 	import { createMutation, useQueryClient } from '@tanstack/svelte-query';
 	import { ArrowUpCircle, RefreshCw, ExternalLink, ChevronDown } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import { createVersionStatusQuery } from '$lib/query/queries';
 	import { apiClient } from '$lib/api/client';
 	import { toastStore } from '$lib/stores/toast';
@@ -128,7 +130,7 @@
 							<span
 								class="inline-block mt-2 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-500/15 text-amber-700 dark:text-amber-300"
 							>
-								prerelease
+prerelease
 							</span>
 						{/if}
 					</div>
@@ -152,7 +154,7 @@
 						class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs font-medium transition-all duration-150 hover:bg-accent hover:translate-x-0.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-x-0"
 					>
 						<RefreshCw class="h-3.5 w-3.5 {checking ? 'animate-spin' : ''}" />
-						{checking ? 'Checking…' : 'Check again'}
+						{checking ? 'Checking\u2026' : 'Check again'}
 					</button>
 				</div>
 

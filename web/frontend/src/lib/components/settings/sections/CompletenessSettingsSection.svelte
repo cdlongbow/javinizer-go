@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormToggle from '$lib/components/settings/FormToggle.svelte';
@@ -105,11 +107,11 @@
 	];
 </script>
 
-<SettingsSection title="Completeness Scoring" description="Configure which metadata fields are essential, important, or nice-to-have for completeness scoring" defaultExpanded={false}>
+<SettingsSection title={$t('settings.completeness.title')} description={$t('settings.completeness.description')} defaultExpanded={false}>
 	<div class="space-y-4">
 		<FormToggle
-			label="Custom Completeness Scoring"
-			description="Enable custom field tier assignments and weights for completeness scoring. When disabled, default weights are used."
+			label={$t('settings.completeness.customScoring')}
+			description={$t('settings.completeness.customScoringDesc')}
 			checked={config.metadata.completeness?.enabled ?? false}
 			onchange={handleEnableToggle}
 		/>
@@ -118,8 +120,8 @@
 			{#each TIER_CONFIG as tierConfig}
 				<SettingsSubsection title={tierConfig.title}>
 					<FormNumberInput
-						label="Weight"
-						description="Percentage contribution to total score"
+						label={$t('settings.completeness.weight')}
+						description={$t('settings.completeness.weightDesc')}
 						value={config.metadata.completeness?.tiers[tierConfig.key]?.weight ?? 0}
 						min={1}
 						max={100}
@@ -128,7 +130,7 @@
 					/>
 
 					<div class="py-2">
-						<p class="text-sm font-medium mb-2">Fields</p>
+						<p class="text-sm font-medium mb-2">{$t('settings.completeness.fields')}</p>
 						<div class="grid grid-cols-1 md:grid-cols-2 gap-2">
 							{#each ALL_FIELDS as field}
 								<label class="flex items-center gap-2 text-sm">
@@ -142,16 +144,16 @@
 								</label>
 							{/each}
 						</div>
-						<p class="text-xs text-muted-foreground mt-2">{getFieldCount(tierConfig.key)} fields assigned</p>
+						<p class="text-xs text-muted-foreground mt-2">{$t('settings.completeness.fieldsAssigned', { values: { count: getFieldCount(tierConfig.key) } })}</p>
 					</div>
 				</SettingsSubsection>
 			{/each}
 
 			<div class="pt-4 border-t mt-4">
 				{#if weightSum === 100}
-					<p class="text-sm text-green-600 dark:text-green-400 font-medium">✓ Weights sum to 100%</p>
+					<p class="text-sm text-green-600 dark:text-green-400 font-medium">{$t('settings.completeness.weightsSumTo100')}</p>
 				{:else}
-					<p class="text-sm text-yellow-600 dark:text-yellow-400 font-medium">⚠ Weights sum to {weightSum}% (recommended: 100%)</p>
+					<p class="text-sm text-yellow-600 dark:text-yellow-400 font-medium">{$t('settings.completeness.weightsSumToN', { values: { count: weightSum } })}</p>
 				{/if}
 			</div>
 
@@ -161,7 +163,7 @@
 					class="text-sm text-primary hover:underline cursor-pointer"
 					onclick={resetToDefaults}
 				>
-					Reset to defaults
+					{$t('settings.completeness.resetToDefaults')}
 				</button>
 			</div>
 		{/if}

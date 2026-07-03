@@ -2,6 +2,8 @@
 	import { fly } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
 	import { Search, ArrowUpDown, GitMerge } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
@@ -44,7 +46,7 @@
 	<Card class="p-4">
 		<div class="flex flex-wrap items-center gap-2">
 			<div class="flex-1 min-w-55">
-				<label class="sr-only" for="search">Search actresses</label>
+				<label class="sr-only" for="search">{$t('actresses.toolbar.searchPlaceholder')}</label>
 				<div class="relative">
 					<Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
 					<input
@@ -54,13 +56,13 @@
 						onkeydown={(event) => {
 							if (event.key === 'Enter') onApplySearch();
 						}}
-						placeholder="Search by English or Japanese name"
+						placeholder="{$t('actresses.toolbar.searchPlaceholder')}"
 						class="w-full rounded-md border border-input bg-background pl-9 pr-3 py-2 text-sm"
 					/>
 				</div>
 			</div>
-			<Button onclick={onApplySearch}>Search</Button>
-			<Button variant="outline" onclick={onClearSearch}>Clear</Button>
+			<Button onclick={onApplySearch}>{$t('actresses.toolbar.searchBtn')}</Button>
+			<Button variant="outline" onclick={onClearSearch}>{$t('actresses.toolbar.clearBtn')}</Button>
 		</div>
 		<div class="mt-3 flex flex-wrap items-center justify-between gap-3">
 			<div class="inline-flex rounded-md border border-input p-1">
@@ -80,7 +82,7 @@
 						viewMode = 'compact';
 					}}
 				>
-					Compact
+					{$t('actresses.toolbar.compactView')}
 				</Button>
 				<Button
 					size="sm"
@@ -89,45 +91,45 @@
 						viewMode = 'table';
 					}}
 				>
-					Table
+					{$t('actresses.toolbar.tableView')}
 				</Button>
 			</div>
 			<div class="flex items-center gap-2">
 				<select
 					bind:value={sortBy}
 					class="rounded-md border border-input bg-background px-3 py-2 text-sm"
-					aria-label="Sort actresses by"
+					aria-label="{$t('actresses.toolbar.sortName').replace('Sort: ', '')}"
 				>
-					<option value="name">Sort: Name</option>
-					<option value="japanese_name">Sort: Japanese Name</option>
-					<option value="id">Sort: Database ID</option>
-					<option value="dmm_id">Sort: DMM ID</option>
-					<option value="updated_at">Sort: Updated Time</option>
-					<option value="created_at">Sort: Created Time</option>
+					<option value="name">{$t('actresses.toolbar.sortName')}</option>
+					<option value="japanese_name">{$t('actresses.toolbar.sortJapaneseName')}</option>
+					<option value="id">{$t('actresses.toolbar.sortDatabaseId')}</option>
+					<option value="dmm_id">{$t('actresses.toolbar.sortDmmId')}</option>
+					<option value="updated_at">{$t('actresses.toolbar.sortUpdatedAt')}</option>
+					<option value="created_at">{$t('actresses.toolbar.sortCreatedAt')}</option>
 				</select>
-				<Button variant="outline" size="sm" onclick={onToggleSortOrder} title="Toggle sort direction">
+				<Button variant="outline" size="sm" onclick={onToggleSortOrder} title="{$t('actresses.toolbar.ascending')}">
 					<ArrowUpDown class="h-4 w-4" />
-					{sortOrder === 'asc' ? 'Asc' : 'Desc'}
+					{sortOrder === 'asc' ? $t('actresses.toolbar.ascending') : $t('actresses.toolbar.descending')}
 				</Button>
 			</div>
 		</div>
 		<div class="mt-3 text-sm text-muted-foreground">
-			Showing {actressesCount} of {total} actress records
+			{$t('actresses.toolbar.showingCount', { values: { visible: actressesCount, total } })}
 			{#if activeQuery}
-				for "{activeQuery}"
+				{$t('actresses.toolbar.searchQuery', { values: { query: activeQuery } })}
 			{/if}
 		</div>
 		<div class="mt-3 flex flex-wrap items-center gap-2 rounded-md border border-input bg-muted/20 px-3 py-2">
 			<span class="text-sm">
-				{selectedIds.length} selected
+				{$t('actresses.toolbar.selectedCount', { values: { count: selectedIds.length } })}
 			</span>
-			<Button variant="outline" size="sm" onclick={onSelectCurrentPage}>Select Page</Button>
+			<Button variant="outline" size="sm" onclick={onSelectCurrentPage}>{$t('actresses.toolbar.selectPage')}</Button>
 			<Button variant="outline" size="sm" onclick={onClearSelection} disabled={selectedIds.length === 0}>
-				Clear
+				{$t('actresses.toolbar.clearSelection')}
 			</Button>
 			<Button size="sm" onclick={onStartMergeSelected} disabled={selectedIds.length < 2}>
 				<GitMerge class="h-4 w-4" />
-				Merge Selected
+				{$t('actresses.toolbar.mergeSelected')}
 			</Button>
 		</div>
 	</Card>

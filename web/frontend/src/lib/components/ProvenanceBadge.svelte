@@ -1,6 +1,8 @@
 <script lang="ts">
 	import type { DataSource } from '$lib/api/types';
 	import { Database, Globe } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		source: DataSource;

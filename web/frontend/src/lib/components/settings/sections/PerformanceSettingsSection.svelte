@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import type { SettingsConfig } from '$lib/api/types';
 
@@ -10,11 +12,11 @@
 	let { config, inputClass }: Props = $props();
 </script>
 
-<SettingsSection title="Performance Settings" description="Configure worker pool and performance tuning options" defaultExpanded={false}>
+<SettingsSection title={$t('settings.performance.title')} description={$t('settings.performance.description')} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div>
 			<label class="block text-sm font-medium mb-2" for="max-workers">
-				Max Workers (concurrent tasks)
+				{$t('settings.performance.maxWorkers')}
 			</label>
 			<input
 				id="max-workers"
@@ -25,12 +27,12 @@
 				max="20"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Higher values = faster but more resource intensive
+				{$t('settings.performance.maxWorkersHint')}
 			</p>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="worker-timeout">Worker Timeout (seconds)</label>
+			<label class="block text-sm font-medium mb-2" for="worker-timeout">{$t('settings.performance.workerTimeout')}</label>
 			<input
 				id="worker-timeout"
 				type="number"
@@ -42,7 +44,7 @@
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="buffer-size">Buffer Size</label>
+			<label class="block text-sm font-medium mb-2" for="buffer-size">{$t('settings.performance.bufferSize')}</label>
 			<input
 				id="buffer-size"
 				type="number"
@@ -52,12 +54,12 @@
 				max="1000"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				Channel buffer size for task communication
+				{$t('settings.performance.bufferSizeHint')}
 			</p>
 		</div>
 
 		<div>
-			<label class="block text-sm font-medium mb-2" for="update-interval">UI Update Interval (ms)</label>
+			<label class="block text-sm font-medium mb-2" for="update-interval">{$t('settings.performance.uiUpdateInterval')}</label>
 			<input
 				id="update-interval"
 				type="number"
@@ -67,7 +69,7 @@
 				max="1000"
 			/>
 			<p class="text-xs text-muted-foreground mt-1">
-				How often to update the UI (lower = more responsive but more CPU)
+				{$t('settings.performance.uiUpdateIntervalHint')}
 			</p>
 		</div>
 	</div>

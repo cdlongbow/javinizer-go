@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import type { SettingsConfig } from '$lib/api/types';
 
@@ -19,22 +21,22 @@
 	}
 </script>
 
-<SettingsSection title="Web UI" description="Configure web interface preferences" defaultExpanded={false}>
+<SettingsSection title={$t('settings.webui.title')} description={$t('settings.webui.description')} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div>
-			<label class="block text-sm font-medium mb-2" for="webui-default-review-view">Default Review View</label>
+			<label class="block text-sm font-medium mb-2" for="webui-default-review-view">{$t('settings.webui.defaultReviewView')}</label>
 			<select
 				id="webui-default-review-view"
 				value={getSelectedView()}
 				onchange={(e) => setSelectedView((e.target as HTMLSelectElement).value)}
 				class={inputClass}
 			>
-				<option value="grid-poster">Grid (Poster)</option>
-				<option value="grid-cover">Grid (Cover)</option>
-				<option value="detail">Detail</option>
+				<option value="grid-poster">{$t('settings.webui.gridPoster')}</option>
+				<option value="grid-cover">{$t('settings.webui.gridCover')}</option>
+				<option value="detail">{$t('settings.webui.detail')}</option>
 			</select>
 			<p class="text-xs text-muted-foreground mt-1">
-				Default view mode when opening the review page. Users can still switch views at runtime.
+				{$t('settings.webui.defaultReviewViewHint')}
 			</p>
 		</div>
 	</div>

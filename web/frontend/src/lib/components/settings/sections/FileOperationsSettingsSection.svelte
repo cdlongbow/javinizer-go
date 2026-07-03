@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import SettingsSubsection from '$lib/components/settings/SettingsSubsection.svelte';
 	import FormTextInput from '$lib/components/settings/FormTextInput.svelte';
@@ -25,63 +27,63 @@
 	}
 </script>
 
-<SettingsSection title="File Operations" description="Control how Javinizer organizes and moves your files" defaultExpanded={false}>
+<SettingsSection title={$t('settings.fileOperations.title')} description={$t('settings.fileOperations.description')} defaultExpanded={false}>
 	<div class="space-y-3">
-		<h4 class="text-sm font-medium">Operation Mode</h4>
-		<p class="text-xs text-muted-foreground">Choose how files are organized during operations</p>
+		<h4 class="text-sm font-medium">{$t('settings.fileOperations.operationMode')}</h4>
+		<p class="text-xs text-muted-foreground">{$t('settings.fileOperations.operationModeHint')}</p>
 		<div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
 			<button
 				onclick={() => handleOperationModeChange('organize')}
 				class="flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {effectiveMode === 'organize' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 			>
-				<div class="font-medium"><FolderOutput size={16} class="inline mr-1" />Organize</div>
-				<div class="text-xs text-muted-foreground">Move to organized folder structure</div>
+				<div class="font-medium"><FolderOutput size={16} class="inline mr-1" />{$t('settings.fileOperations.modeOrganize')}</div>
+				<div class="text-xs text-muted-foreground">{$t('settings.fileOperations.modeOrganizeDesc')}</div>
 			</button>
 
 			<button
 				onclick={() => handleOperationModeChange('in-place')}
 				class="flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {effectiveMode === 'in-place' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 			>
-				<div class="font-medium"><FolderOpen size={16} class="inline mr-1" />Reorganize in place</div>
-				<div class="text-xs text-muted-foreground">Keep location, rename folder and file</div>
+				<div class="font-medium"><FolderOpen size={16} class="inline mr-1" />{$t('settings.fileOperations.modeReorganize')}</div>
+				<div class="text-xs text-muted-foreground">{$t('settings.fileOperations.modeReorganizeDesc')}</div>
 			</button>
 
 			<button
 				onclick={() => handleOperationModeChange('in-place-norenamefolder')}
 				class="flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {effectiveMode === 'in-place-norenamefolder' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 			>
-				<div class="font-medium"><FileEdit size={16} class="inline mr-1" />Rename file only</div>
-				<div class="text-xs text-muted-foreground">Rename video file, keep folder name</div>
+				<div class="font-medium"><FileEdit size={16} class="inline mr-1" />{$t('settings.fileOperations.modeRenameFile')}</div>
+				<div class="text-xs text-muted-foreground">{$t('settings.fileOperations.modeRenameFileDesc')}</div>
 			</button>
 
 			<button
 				onclick={() => handleOperationModeChange('metadata-artwork')}
 				class="flex flex-col items-start gap-1 p-3 rounded-lg border-2 text-sm transition-all {effectiveMode === 'metadata-artwork' ? 'border-primary bg-primary/5 font-medium' : 'border-border hover:border-primary/50'}"
 			>
-				<div class="font-medium"><FileText size={16} class="inline mr-1" />Metadata & Artwork</div>
-				<div class="text-xs text-muted-foreground">No file or folder changes</div>
+				<div class="font-medium"><FileText size={16} class="inline mr-1" />{$t('settings.fileOperations.modeMetadataArtwork')}</div>
+				<div class="text-xs text-muted-foreground">{$t('settings.fileOperations.modeMetadataArtworkDesc')}</div>
 			</button>
 		</div>
 		{#if effectiveMode === 'organize' && noFolderFormat}
 			<p class="text-xs text-muted-foreground">
-				No folder naming template set — when destination matches source path, files will be renamed in place only.
+				{$t('settings.fileOperations.noFolderTemplate')}
 			</p>
 		{/if}
 	</div>
 
 	<FormToggle
-		label="Rename file"
-		description="Rename video files according to the file naming template"
+		label={$t('settings.fileOperations.renameFile')}
+		description={$t('settings.fileOperations.renameFileDesc')}
 		checked={config.output.rename_file ?? true}
 		onchange={(val) => {
 			config.output.rename_file = val;
 		}}
 	/>
 
-	<SettingsSubsection title="Revert">
+	<SettingsSubsection title={$t('settings.fileOperations.revert')}>
 		<FormToggle
-			label="Allow Revert"
-			description="Enable the revert feature to undo organize operations and restore files to their original locations. When disabled, revert buttons are hidden and revert API calls are blocked."
+			label={$t('settings.fileOperations.allowRevert')}
+			description={$t('settings.fileOperations.allowRevertDesc')}
 			checked={config.output.allow_revert ?? false}
 			onchange={(val) => {
 				config.output.allow_revert = val;
@@ -89,10 +91,10 @@
 		/>
 	</SettingsSubsection>
 
-	<SettingsSubsection title="Subtitle Handling">
+	<SettingsSubsection title={$t('settings.fileOperations.subtitleHandling')}>
 		<FormToggle
-			label="Move subtitles"
-			description="Automatically move subtitle files (.srt, .ass, etc.) with video files"
+			label={$t('settings.fileOperations.moveSubtitles')}
+			description={$t('settings.fileOperations.moveSubtitlesDesc')}
 			checked={config.output.move_subtitles ?? false}
 			onchange={(val) => {
 				config.output.move_subtitles = val;
@@ -100,8 +102,8 @@
 		/>
 
 		<FormTextInput
-			label="Subtitle extensions"
-			description="Comma-separated list of subtitle file extensions to move with videos"
+			label={$t('settings.fileOperations.subtitleExtensions')}
+			description={$t('settings.fileOperations.subtitleExtensionsDesc')}
 			value={config.output.subtitle_extensions?.join(', ') ?? '.srt, .ass, .ssa, .sub, .vtt'}
 			placeholder=".srt, .ass, .ssa, .sub, .vtt"
 			onchange={(val) => {

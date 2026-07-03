@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 
@@ -23,7 +25,7 @@
 <Card class="p-3">
 	<div class="flex items-center justify-between text-sm">
 		<div class="text-muted-foreground">
-			Page {currentPage} of {totalPages}
+			{$t('fileBrowser.pageInfo', { values: { page: currentPage, total: totalPages, count: 0 } })}
 		</div>
 		<div class="flex items-center gap-2">
 			<Button variant="outline" size="sm" onclick={onPrevPage} disabled={!canGoPrev}>

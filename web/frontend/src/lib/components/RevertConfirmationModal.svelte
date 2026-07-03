@@ -3,6 +3,8 @@
 	import { fade, scale } from 'svelte/transition';
 	import { portalToBody } from '$lib/actions/portal';
 	import { AlertTriangle, LoaderCircle } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import Card from '$lib/components/ui/Card.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 

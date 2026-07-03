@@ -3,6 +3,8 @@
 	import StatusBadge from '$lib/components/StatusBadge.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import type { OperationItem } from '$lib/api/types';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		operation: OperationItem;

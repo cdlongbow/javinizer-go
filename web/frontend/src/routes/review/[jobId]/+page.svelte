@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 	import { fade } from 'svelte/transition';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
@@ -58,18 +60,18 @@
 	<div class="max-w-7xl mx-auto space-y-6">
 		{#if s.loading}
 			<div class="text-center py-12">
-				<p class="text-muted-foreground">Loading batch job...</p>
+				<p class="text-muted-foreground">{$t('review.loading')}</p>
 			</div>
 		{:else if s.error}
 			<Card class="p-6">
 				<div class="text-center text-destructive">
 					<CircleAlert class="h-12 w-12 mx-auto mb-4" />
-					<p class="font-semibold">Error</p>
+					<p class="font-semibold">{$t('review.error.title')}</p>
 					<p class="text-sm">{s.error}</p>
 					<Button onclick={() => goto('/browse')} class="mt-4">
 						{#snippet children()}
 							<ChevronLeft class="h-4 w-4 mr-2" />
-							Back to Browse
+							{$t('review.backToBrowse')}
 						{/snippet}
 					</Button>
 				</div>
@@ -77,11 +79,11 @@
 		{:else if s.job && !hasMovies && !hasFailed}
 			<Card class="p-6">
 				<div class="text-center">
-					<p class="text-muted-foreground">No movies to review</p>
+					<p class="text-muted-foreground">{$t('review.noMovies')}</p>
 					<Button onclick={() => goto('/browse')} class="mt-4">
 						{#snippet children()}
 							<ChevronLeft class="h-4 w-4 mr-2" />
-							Back to Browse
+							{$t('review.backToBrowse')}
 						{/snippet}
 					</Button>
 				</div>
@@ -104,7 +106,7 @@
 							{!hasMovies ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
 					>
 						<Film class="h-4 w-4" />
-						Movies
+						{$t('review.tab.movies')}
 						{#if hasMovies}
 							<span class="rounded-full bg-muted px-2 py-0.5 text-xs font-normal">
 								{s.movieResults.length}
@@ -126,7 +128,7 @@
 							{!hasFailed ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
 					>
 						<AlertTriangle class="h-4 w-4" />
-						Failed
+						{$t('review.tab.failed')}
 						{#if hasFailed}
 							<span class="rounded-full bg-destructive/10 text-destructive px-2 py-0.5 text-xs font-normal">
 								{s.failedResults.length}
@@ -321,7 +323,7 @@
 				{:else if activeTab === 'movies'}
 					<Card class="p-6">
 						<div class="text-center text-muted-foreground">
-							<p>No movies to review yet.</p>
+							<p>{$t('review.noMoviesYet')}</p>
 						</div>
 					</Card>
 				{/if}
@@ -344,14 +346,14 @@
 							<Button onclick={() => goto('/browse')}>
 								{#snippet children()}
 									<ChevronLeft class="h-4 w-4 mr-2" />
-									Back to Browse
+									{$t('review.backToBrowse')}
 								{/snippet}
 							</Button>
 						</div>
 					{:else}
 						<Card class="p-6">
 							<div class="text-center text-muted-foreground">
-								<p>No failed files. Everything was identified successfully.</p>
+								<p>{$t('review.noFailedFiles')}</p>
 							</div>
 						</Card>
 					{/if}
@@ -364,7 +366,7 @@
 <VideoModal
 	bind:show={s.showTrailerModal}
 	videoUrl={s.currentMovie?.trailer_url ?? ''}
-	title="Trailer"
+	title={$t('review.trailerTitle')}
 	onClose={() => (s.showTrailerModal = false)}
 />
 

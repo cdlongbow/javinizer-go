@@ -8,6 +8,8 @@
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import Button from '$lib/components/ui/Button.svelte';
 	import { Plus, Loader2, Trash2, RefreshCw } from 'lucide-svelte';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	interface Props {
 		onTokenDisplay?: (response: CreateTokenResponse) => void;
@@ -28,35 +30,35 @@
 		mutationFn: (name?: string) => createToken(name),
 		onSuccess: (data: CreateTokenResponse) => {
 			newTokenName = '';
-			toastStore.success('API token created', 3000);
+			toastStore.success(get(t)('settings.apiTokens.created'), 3000);
 			onTokenDisplay?.(data);
 			void queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to create token', 4000);
+			toastStore.error(err.message || get(t)('settings.apiTokens.createFailed'), 4000);
 		}
 	}));
 
 	const revokeTokenMutation = createMutation(() => ({
 		mutationFn: (id: string) => revokeToken(id),
 		onSuccess: () => {
-			toastStore.success('Token revoked', 3000);
+			toastStore.success(get(t)('settings.apiTokens.revoked'), 3000);
 			void queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to revoke token', 4000);
+			toastStore.error(err.message || get(t)('settings.apiTokens.revokeFailed'), 4000);
 		}
 	}));
 
 	const regenerateTokenMutation = createMutation(() => ({
 		mutationFn: (id: string) => regenerateToken(id),
 		onSuccess: (data: CreateTokenResponse) => {
-			toastStore.success('Token regenerated', 3000);
+			toastStore.success(get(t)('settings.apiTokens.regenerated'), 3000);
 			onTokenDisplay?.(data);
 			void queryClient.invalidateQueries({ queryKey: ['api-tokens'] });
 		},
 		onError: (err: Error) => {
-			toastStore.error(err.message || 'Failed to regenerate token', 4000);
+			toastStore.error(err.message || get(t)('settings.apiTokens.regenerateFailed'), 4000);
 		}
 	}));
 
@@ -66,9 +68,9 @@
 
 	async function handleRevoke(id: string, name: string) {
 		const confirmed = await confirmDialog(
-			'Revoke Token',
-			`Are you sure you want to revoke the token "${name || id}"? This action cannot be undone.`,
-			{ confirmLabel: 'Revoke', variant: 'danger' }
+			get(t)('settings.apiTokens.revokeConfirmTitle'),
+			get(t)('settings.apiTokens.revokeConfirmMsg', { values: { name: name || id } }),
+			{ confirmLabel: get(t)('settings.apiTokens.revokeConfirmLabel'), variant: 'danger' }
 		);
 		if (confirmed) {
 			revokeTokenMutation.mutate(id);
@@ -77,9 +79,9 @@
 
 	async function handleRegenerate(id: string, name: string) {
 		const confirmed = await confirmDialog(
-			'Regenerate Token',
-			`Regenerating the token "${name || id}" will invalidate the current value. Make sure you no longer need it. Continue?`,
-			{ confirmLabel: 'Regenerate', variant: 'danger' }
+			get(t)('settings.apiTokens.regenerateConfirmTitle'),
+			get(t)('settings.apiTokens.regenerateConfirmMsg', { values: { name: name || id } }),
+			{ confirmLabel: get(t)('settings.apiTokens.regenerateConfirmLabel'), variant: 'danger' }
 		);
 		if (confirmed) {
 			regenerateTokenMutation.mutate(id);
@@ -87,7 +89,7 @@
 	}
 
 	function formatDate(dateStr: string | null): string {
-		if (!dateStr) return 'Never';
+		if (!dateStr) return get(t)('settings.apiTokens.never');
 		try {
 			return new Date(dateStr).toLocaleDateString(undefined, {
 				year: 'numeric',
@@ -109,21 +111,21 @@
 	}
 </script>
 
-<SettingsSection title="API Tokens" description="Manage API tokens for programmatic access to the Javinizer API" defaultExpanded={false}>
+<SettingsSection title={$t('settings.apiTokens.title')} description={$t('settings.apiTokens.description')} defaultExpanded={false}>
 	{#if loading}
 		<div class="flex items-center justify-center py-8 text-muted-foreground">
 			<Loader2 class="h-5 w-5 animate-spin mr-2" />
-			Loading...
+			{$t('settings.apiTokens.loading')}
 		</div>
 	{:else if error}
 		<div class="text-destructive text-sm py-4">
-			Failed to load API tokens: {error}
+			{$t('settings.apiTokens.errorLoading', { values: { error } })}
 		</div>
 	{:else}
 		<div class="space-y-4">
 			{#if tokens.length === 0}
 				<p class="text-sm text-muted-foreground py-4">
-					No API tokens configured. Create one below to enable programmatic access.
+					{$t('settings.apiTokens.noTokens')}
 				</p>
 			{:else}
 				<div class="relative border border-border rounded-lg overflow-hidden">
@@ -131,17 +133,17 @@
 						<table class="w-full text-sm">
 							<thead>
 								<tr class="border-b border-border bg-muted/50">
-									<th class="text-left py-2 px-3 font-medium text-muted-foreground">Name</th>
-									<th class="text-left py-2 px-3 font-medium text-muted-foreground">Prefix</th>
-									<th class="text-left py-2 px-3 font-medium text-muted-foreground">Created</th>
-									<th class="text-left py-2 px-3 font-medium text-muted-foreground">Last Used</th>
-									<th class="text-right py-2 px-3 font-medium text-muted-foreground">Actions</th>
+									<th class="text-left py-2 px-3 font-medium text-muted-foreground">{$t('settings.apiTokens.headerName')}</th>
+									<th class="text-left py-2 px-3 font-medium text-muted-foreground">{$t('settings.apiTokens.headerPrefix')}</th>
+									<th class="text-left py-2 px-3 font-medium text-muted-foreground">{$t('settings.apiTokens.headerCreated')}</th>
+									<th class="text-left py-2 px-3 font-medium text-muted-foreground">{$t('settings.apiTokens.headerLastUsed')}</th>
+									<th class="text-right py-2 px-3 font-medium text-muted-foreground">{$t('settings.apiTokens.headerActions')}</th>
 								</tr>
 							</thead>
 							<tbody>
 								{#each tokens as token (token.id)}
 									<tr class="border-b border-border/50 hover:bg-accent/30 transition-colors">
-										<td class="py-2 px-3">{#if token.name}{token.name}{:else}<span class="text-muted-foreground italic">Unnamed</span>{/if}</td>
+										<td class="py-2 px-3">{#if token.name}{token.name}{:else}<span class="text-muted-foreground italic">{$t('settings.apiTokens.unnamed')}</span>{/if}</td>
 										<td class="py-2 px-3 font-mono text-xs">{token.token_prefix}</td>
 										<td class="py-2 px-3 text-xs">{formatDate(token.created_at)}</td>
 										<td class="py-2 px-3 text-xs">{formatDate(token.last_used_at)}</td>
@@ -150,7 +152,7 @@
 												<button
 													type="button"
 													class="text-muted-foreground hover:text-foreground transition-colors p-1 rounded"
-													title="Regenerate token"
+													title={$t('settings.apiTokens.regenerateTitle')}
 													onclick={() => handleRegenerate(token.id, token.name)}
 													disabled={regenerateTokenMutation.isPending}
 												>
@@ -159,7 +161,7 @@
 												<button
 													type="button"
 													class="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-													title="Revoke token"
+													title={$t('settings.apiTokens.revokeTitle')}
 													onclick={() => handleRevoke(token.id, token.name)}
 													disabled={revokeTokenMutation.isPending}
 												>
@@ -174,20 +176,20 @@
 					</div>
 				</div>
 				<p class="text-xs text-muted-foreground">
-					{tokens.length} token{tokens.length !== 1 ? 's' : ''} active
+					{$t('settings.apiTokens.tokensActive', { values: { count: tokens.length } })}
 				</p>
 			{/if}
 
 			<div class="border-t pt-4">
-				<p class="text-xs text-muted-foreground mb-3">Create a new API token:</p>
+				<p class="text-xs text-muted-foreground mb-3">{$t('settings.apiTokens.createNew')}</p>
 				<div class="flex items-end gap-2">
 					<div class="flex-1">
-						<label for="token-name" class="block text-xs font-medium text-muted-foreground mb-1">Name (optional)</label>
+						<label for="token-name" class="block text-xs font-medium text-muted-foreground mb-1">{$t('settings.apiTokens.nameOptional')}</label>
 						<input
 							id="token-name"
 							type="text"
 							bind:value={newTokenName}
-							placeholder="e.g., CI Pipeline"
+							placeholder={$t('settings.apiTokens.namePlaceholder')}
 							onkeydown={handleCreateKeydown}
 							class="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 						/>
@@ -202,13 +204,13 @@
 						{:else}
 							<Plus class="h-4 w-4 mr-1" />
 						{/if}
-						Create Token
+						{$t('settings.apiTokens.createToken')}
 					</Button>
 				</div>
 			</div>
 
 			<p class="text-xs text-muted-foreground">
-				Tokens use the <code class="font-mono bg-muted px-1 rounded">jv_</code> prefix. The full token value is shown only once after creation.
+				{$t('settings.apiTokens.tokenPrefixHint')}
 			</p>
 		</div>
 	{/if}

@@ -6,6 +6,8 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import SettingsSection from '$lib/components/settings/SettingsSection.svelte';
 	import type { SettingsConfig, ScraperOption, ScraperSettings } from '$lib/api/types';
+	import { get } from 'svelte/store';
+	import { t } from '$lib/i18n/setup';
 
 	type ScraperProxyMode = 'direct' | 'inherit' | 'specific';
 
@@ -64,23 +66,22 @@
 	}: Props = $props();
 </script>
 
-<SettingsSection title="Scraper Settings" description="Enable/disable scrapers and configure user agent. Scraper priority is managed in Metadata Priority section." defaultExpanded={false}>
+<SettingsSection title={$t('settings.scraper.title')} description={$t('settings.scraper.description')} defaultExpanded={false}>
 	<div class="space-y-4">
 		<div>
 			<div class="flex items-center justify-between mb-2">
-				<span class="text-sm font-medium">Available Scrapers</span>
+				<span class="text-sm font-medium">{$t('settings.scraper.availableScrapers')}</span>
 				<div class="flex gap-2">
 					<Button variant="outline" size="sm" onclick={selectAllScrapers}>
-						{#snippet children()}Select All{/snippet}
+						{#snippet children()}{$t('settings.scraper.selectAll')}{/snippet}
 					</Button>
 					<Button variant="outline" size="sm" onclick={clearAllScrapers}>
-						{#snippet children()}Clear All{/snippet}
+						{#snippet children()}{$t('settings.scraper.clearAll')}{/snippet}
 					</Button>
 				</div>
 			</div>
 			<p class="text-xs text-muted-foreground mb-3">
-				Global proxy must be enabled for scraper proxy settings to take effect.
-				Each scraper can be set to Direct (bypass), Inherit (global default), or Specific (custom profile).
+				{$t('settings.scraper.globalProxyHint')}
 			</p>
 			<div class="space-y-2">
 				{#each scrapers as scraper, index (scraper.name)}
@@ -106,7 +107,7 @@
 									{@const usage = getScraperUsage(scraper.name)}
 									{#if usage.count > 0}
 										<span class="ml-2 text-xs font-normal text-muted-foreground">
-											(used in {usage.count} field{usage.count !== 1 ? 's' : ''})
+											{$t('settings.scraper.usedInFields', { values: { count: usage.count } })}
 										</span>
 									{/if}
 								{/if}
@@ -128,44 +129,44 @@
 						{#if scraper.enabled && scraper.expanded && scraperHasOptions(scraper)}
 							<div class="px-3 pb-3 pt-0 border-t bg-muted/20" transition:slide|local={{ duration: 220, easing: quintOut }}>
 								<div class="pl-8 py-3 space-y-3" in:fade|local={{ duration: 170 }}>
-									<h4 class="text-sm font-medium">{scraper.displayName} Options</h4>
+									<h4 class="text-sm font-medium">{$t('settings.scraper.options', { values: { name: scraper.displayName } })}</h4>
 									{#if scraperSupportsProxyOptions(scraper)}
 										<div class="rounded-md border border-border/80 bg-background/70 p-3 space-y-3">
 											<div>
-												<p class="text-sm font-medium">Proxy Routing</p>
+												<p class="text-sm font-medium">{$t('settings.scraper.proxyRouting')}</p>
 												<p class="text-xs text-muted-foreground mt-1">
-													Global proxy must be enabled for these settings to apply.
+													{$t('settings.scraper.proxyRoutingHint')}
 												</p>
 											</div>
 
 											<div class="grid gap-3 md:grid-cols-2">
 												<div>
-													<label class="block text-sm font-medium mb-1" for="proxy-mode-{scraper.name}">Proxy mode</label>
+													<label class="block text-sm font-medium mb-1" for="proxy-mode-{scraper.name}">{$t('settings.scraper.proxyMode')}</label>
 													<select
 														id="proxy-mode-{scraper.name}"
 														value={getScraperProxyMode(scraper.name)}
 														onchange={(e) => setScraperProxyMode(scraper.name, e.currentTarget.value as ScraperProxyMode)}
 														class="w-full px-3 py-2 border rounded-md transition-all text-sm bg-background focus:ring-2 focus:ring-primary focus:border-primary"
 													>
-														<option value="direct">Direct (No proxy)</option>
-														<option value="inherit">Inherit Global Proxy</option>
-														<option value="specific">Use Scraper Profile</option>
+														<option value="direct">{$t('settings.scraper.proxyModeDirect')}</option>
+														<option value="inherit">{$t('settings.scraper.proxyModeInherit')}</option>
+														<option value="specific">{$t('settings.scraper.proxyModeSpecific')}</option>
 													</select>
 													<p class="text-xs text-muted-foreground mt-1">
 														{#if !(config.scrapers?.proxy?.enabled ?? false)}
-															<span class="text-amber-600">⚠ Global proxy is disabled. This scraper will use Direct mode regardless of setting above.</span>
+															<span class="text-amber-600">{$t('settings.scraper.proxyDisabledHint')}</span>
 														{:else if getScraperProxyMode(scraper.name) === 'direct'}
-															This scraper will bypass proxy and connect directly.
+															{$t('settings.scraper.proxyModeDirectHint')}
 														{:else if getScraperProxyMode(scraper.name) === 'inherit'}
-															Uses global proxy default profile.
+															{$t('settings.scraper.proxyModeInheritHint')}
 														{:else}
-															Uses the scraper-specific profile selected below.
+															{$t('settings.scraper.proxyModeSpecificHint')}
 														{/if}
 													</p>
 												</div>
 
 												<div class={getScraperProxyMode(scraper.name) === 'specific' ? '' : 'opacity-60'}>
-													<label class="block text-sm font-medium mb-1" for="proxy-profile-{scraper.name}">Scraper profile</label>
+													<label class="block text-sm font-medium mb-1" for="proxy-profile-{scraper.name}">{$t('settings.scraper.scraperProfile')}</label>
 													<select
 														id="proxy-profile-{scraper.name}"
 														value={(config.scrapers?.[scraper.name] as ScraperSettings)?.proxy?.profile ?? ''}
@@ -173,13 +174,13 @@
 														onchange={(e) => setOptionValue(scraper.name, 'proxy.profile', e.currentTarget.value)}
 														class="w-full px-3 py-2 border rounded-md transition-all text-sm {getScraperProxyMode(scraper.name) === 'specific' ? 'bg-background focus:ring-2 focus:ring-primary focus:border-primary' : 'bg-muted/70 text-muted-foreground border-border/60 cursor-not-allowed'}"
 													>
-														<option value="">Select profile</option>
+														<option value="">{$t('settings.scraper.selectProfile')}</option>
 														{#each getProxyProfileNames() as profileName}
 															<option value={profileName}>{profileName}</option>
 														{/each}
 													</select>
 													<p class="text-xs text-muted-foreground mt-1">
-														Only used when Proxy mode is "Use Scraper Profile".
+														{$t('settings.scraper.profileHint')}
 													</p>
 												</div>
 											</div>
@@ -203,9 +204,9 @@
 												<p class="text-xs text-muted-foreground ml-6">
 													{option.description}
 													{#if optionDisabled && option.key === 'use_browser'}
-														<span class="text-amber-600 block mt-1">⚠ Enable 'Use Browser' in global settings to use this option.</span>
+														<span class="text-amber-600 block mt-1">{$t('settings.scraper.browserDisabledHint')}</span>
 													{:else if optionDisabled && option.key === 'scrape_actress'}
-														<span class="text-amber-600 block mt-1">⚠ Enable 'Scrape Actress Information' in global settings to use this option.</span>
+														<span class="text-amber-600 block mt-1">{$t('settings.scraper.actressDisabledHint')}</span>
 													{/if}
 												</p>
 											{:else if option.type === 'select'}
