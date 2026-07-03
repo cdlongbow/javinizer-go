@@ -1,0 +1,104 @@
+name: 错误报告
+description: 报告错误或非预期行为
+labels: ["bug"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: 描述错误
+      description: 清晰简洁地描述该错误的具体表现。
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 复现该行为的步骤。
+      placeholder: |
+        1. 使用包含 scraper.x 启用的配置运行 `javinizer tui ~/Videos`
+        2. 处理文件 `IPX-123.mp4`
+        3. 在输出中看到错误
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+      description: 清晰简洁地描述你期望发生的结果。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 执行模式
+      description: 你是以何种方式运行 javinizer 的？
+      options:
+        - CLI (javinizer scrape)
+        - CLI (javinizer sort)
+        - TUI (javinizer tui)
+        - API / Web UI (javinizer api)
+        - 其他
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Javinizer 版本
+      description: 运行 `javinizer version` 的输出或发布标签。
+      placeholder: 例如 v0.5.0, 最新 commit 哈希
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      description: 操作系统及版本。
+      placeholder: 例如 Windows 11, macOS 15.2, Ubuntu 24.04
+    validations:
+      required: true
+
+  - type: input
+    id: go_version
+    attributes:
+      label: Go 版本
+      description: 运行 `go version` 的输出（如果是从源码构建）。
+      placeholder: 例如 go1.23.4
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 相关日志输出
+      description: |
+        粘贴相关日志输出。使用 `LOG_LEVEL=debug` 获取更详细的信息。
+        **请勿粘贴抓取的 URL 或 API 密钥。**
+      render: shell
+
+  - type: textarea
+    id: config
+    attributes:
+      label: 相关配置
+      description: |
+        粘贴配置中的相关部分（请脱敏处理个人信息）。
+        配置文件通常位于 `~/.javinizer/config.yaml` 或通过 `JAVINIZER_CONFIG` 指定。
+      render: yaml
+
+  - type: textarea
+    id: file_example
+    attributes:
+      label: 示例文件
+      description: |
+        如果错误涉及文件匹配/抓取/整理，请提供示例文件名和预期的抓取结果。
+      placeholder: |
+        文件名: IPX-123.mp4
+        预期匹配: IPX-123
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: 补充信息
+      description: 在此添加关于该问题的任何其他上下文。

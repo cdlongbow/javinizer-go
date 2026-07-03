@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 问题 / 支持
+    url: https://github.com/javinizer/javinizer-go/discussions
+    about: 提问或获取使用 javinizer 的帮助。

@@ -1,0 +1,77 @@
+name: 抓取器问题
+description: 报告特定抓取器的问题
+labels: ["scraper"]
+body:
+  - type: dropdown
+    id: scraper
+    attributes:
+      label: 抓取器
+      description: 哪个抓取器受到影响？
+      options:
+        - AVEntertainment
+        - Caribbeancom
+        - DLGetchu
+        - DMM
+        - FC2
+        - JAV321
+        - JavBus
+        - JavDB
+        - JavLibrary
+        - JavStash
+        - LibreDMM
+        - MGSStage
+        - R18Dev
+        - TokyoHot
+        - 其他
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: 描述问题
+      description: 出了什么问题？哪些数据缺失或不正确？
+    validations:
+      required: true
+
+  - type: input
+    id: search_query
+    attributes:
+      label: 搜索查询 / 影片 ID
+      description: 你搜索的 ID 或 URL。
+      placeholder: 例如 IPX-123, https://www.javbus.com/IPX-123
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+      description: 抓取器应返回哪些数据？
+      placeholder: |
+        标题: ...
+        演员: ...
+        类型: ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 抓取器实际返回了什么数据？如有相关日志输出，请一并粘贴。
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: Javinizer 版本
+      placeholder: 例如 v0.5.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: 补充信息
+      description: 配置覆盖、代理设置或任何其他相关信息。

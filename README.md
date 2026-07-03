@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README.zh.md)
+
 # Javinizer Go
 
 A metadata scraper and file organizer for Japanese Adult Videos (JAV), with CLI, TUI, REST API, and a web UI. A Go recreation of the original [Javinizer](https://github.com/jvlflame/Javinizer).
