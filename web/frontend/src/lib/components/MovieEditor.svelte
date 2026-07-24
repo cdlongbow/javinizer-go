@@ -2,7 +2,7 @@
 	import * as m from '$lib/paraglide/messages';
 	import type { Movie, Genre, FieldDifference } from '$lib/api/types';
 	import { apiClient } from '$lib/api/client';
-	import { CircleAlert, LoaderCircle, X, Plus, Check } from 'lucide-svelte';
+	import { CircleAlert, LoaderCircle, X, Plus, Check, Star } from 'lucide-svelte';
 	import NfoDiffBadge from './NfoDiffBadge.svelte';
 
 	interface Props {
@@ -15,9 +15,13 @@
 		resultId?: string;
 		nfoDifferences?: FieldDifference[];
 		favoriteGenres?: string[];
+		favoritedGenreNames?: Set<string>;
+		onAddFavorite?: (genre: string) => void;
+		onRemoveFavorite?: (genre: string) => void;
+		favoriteMutationPending?: boolean;
 	}
 
-	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences, favoriteGenres = [] }: Props = $props();
+	let { movie, originalMovie, onUpdate, fieldSources, showFieldSources = false, jobId, resultId, nfoDifferences, favoriteGenres = [], favoritedGenreNames = new Set<string>(), onAddFavorite, onRemoveFavorite, favoriteMutationPending = false }: Props = $props();
 
 	// Create a local editable copy - initialized by effect
 	let editedMovie = $state<Movie>({} as Movie);
@@ -191,6 +195,15 @@
 			unique.push(trimmed);
 		}
 		return unique.sort((a, b) => a.localeCompare(b));
+	});
+	const favoritedNameByKey = $derived.by(() => {
+		const map = new Map<string, string>();
+		for (const g of favoriteGenres) {
+			const trimmed = g.trim();
+			if (!trimmed) continue;
+			map.set(trimmed.toLowerCase(), trimmed);
+		}
+		return map;
 	});
 	const presentGenreNames = $derived.by(() => {
 		const set = new Set<string>();
@@ -510,6 +523,27 @@
 					{#each editedMovie.genres as genre}
 						<span class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-linear-to-br from-primary/10 to-primary/5 text-primary rounded-full text-sm font-medium hover:from-primary/15 hover:to-primary/10 transition-all shadow-sm border border-primary/10">
 							<span class="leading-none">{genre.name}</span>
+							{#if onAddFavorite && onRemoveFavorite}
+								{@const isFavorited = favoritedGenreNames.has(normalizeGenreName(genre.name))}
+								{@const storedFavoriteName = favoritedNameByKey.get(normalizeGenreName(genre.name)) ?? genre.name}
+								{@const favoriteLabel = isFavorited
+									? m.movie_genre_remove_from_favorites_title({ name: genre.name })
+									: m.movie_genre_add_to_favorites_title({ name: genre.name })}
+								<button
+									type="button"
+									disabled={favoriteMutationPending}
+									onclick={() => isFavorited ? onRemoveFavorite?.(storedFavoriteName) : onAddFavorite?.(genre.name)}
+									class="ml-0.5 p-0.5 rounded-full hover:bg-primary/20 transition-all opacity-70 hover:opacity-100 disabled:opacity-50 disabled:cursor-not-allowed"
+									aria-label={favoriteLabel}
+									title={favoriteLabel}
+								>
+									{#if isFavorited}
+										<Star class="h-3.5 w-3.5 fill-current" />
+									{:else}
+										<Star class="h-3.5 w-3.5" />
+									{/if}
+								</button>
+							{/if}
 							<button
 								type="button"
 								onclick={() => removeGenre(genre.name)}
