@@ -41,6 +41,7 @@ type applyFileOutcome struct {
 	PanicMsg  string
 	ErrorMsg  string
 	Movie     *models.Movie // updated movie after apply (nil if failed)
+	DryRun    bool          // true if apply was a dry-run
 }
 
 // Run executes the apply phase: setup errgroup → iterate files → dispatch
@@ -114,17 +115,15 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	)
 
 	if err := ctx.Err(); err != nil {
+		var org, fail int64
+		trackApplyResults(inputs, outcomes, &org, &fail)
 		inputs.Lifecycle.MarkCancelled()
-		// On cancellation, skip trackResults + OnPhaseComplete + MarkOrganized/
-		// MarkCompleted — the job is cancelled, not completed. Any outcomes
-		// collected before cancellation are already reflected on the in-memory
-		// result via UpdateFileResult inside each worker goroutine.
 		return
 	}
 
 	var organized int64
 	var failed int64
-	trackApplyResults(outcomes, &organized, &failed)
+	trackApplyResults(inputs, outcomes, &organized, &failed)
 
 	orgCount := atomic.LoadInt64(&organized)
 	failCount := atomic.LoadInt64(&failed)
@@ -281,7 +280,9 @@ func interpretApplyResult(
 			EndedAt:       &now,
 		})
 		if isCancelled {
-			// Cancellation is not a failure: broadcast a non-failure apply event
+			if result != nil && result.OrganizeResult != nil {
+				auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
+			}
 			// and do NOT invoke OnFileFailed, otherwise the review page records
 			// the file as failed and offers a Retry path despite the persisted
 			// result being Cancelled.
@@ -313,6 +314,9 @@ func interpretApplyResult(
 		}
 		outcome.Failed = true
 		outcome.ErrorMsg = errMsg
+		if !cfg.OrganizeOptions.Skip || (result != nil && result.OrganizeResult != nil) {
+			auditOrganizeFailure(inputs, movie, filePath, result, applyErr, cfg)
+		}
 		return outcome
 	}
 
@@ -342,6 +346,7 @@ func interpretApplyResult(
 		cfg.OnFileOrganized(filePath)
 	}
 	outcome.Success = true
+	auditOrganizeSuccess(inputs, movie, filePath, result, cfg)
 	return outcome
 }
 
@@ -376,6 +381,7 @@ func applyFile(
 	outcome = applyFileOutcome{
 		FilePath: filePath,
 		MovieID:  movie.ID,
+		DryRun:   cfg.DryRun,
 	}
 
 	rc := recoveryContext{
@@ -423,16 +429,16 @@ func applyFile(
 // trackApplyResults processes collected applyFileOutcomes: increments counters
 // for organized/failed. The actual Updater/Broadcaster calls are already done
 // inside applyFile; this function only handles the aggregate counters.
-func trackApplyResults(outcomes []applyFileOutcome, organized *int64, failed *int64) {
+func trackApplyResults(inputs applyPhaseInputs, outcomes []applyFileOutcome, organized *int64, failed *int64) {
 	for _, o := range outcomes {
 		if o.Success {
 			atomic.AddInt64(organized, 1)
 		}
-		// Count panics as failures too. Currently setPanic() sets both Panic
-		// and Failed, so the || o.Panic is defensive — it future-proofs against
-		// changes to setPanic that might set only Panic without Failed.
 		if o.Failed || o.Panic {
 			atomic.AddInt64(failed, 1)
+		}
+		if o.Panic && !o.Cancelled && !inputs.OrganizeSkipped {
+			auditOrganizePanic(inputs, o)
 		}
 	}
 }

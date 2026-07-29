@@ -111,6 +111,8 @@ type scrapePhaseInputs struct {
 	// the workflow's Scrape persists inline as before.
 	MovieRepo database.MovieRepositoryInterface
 
+	HistoryRepo database.HistoryRepositoryInterface
+
 	Broadcaster progressBroadcaster
 	Updater     resultstore.ResultUpdater
 	Lifecycle   PhaseLifecycle
@@ -130,6 +132,10 @@ type applyPhaseInputs struct {
 	Excluded    map[string]bool
 	Destination string
 	Update      bool // Update mode (in-place, no file organization)
+
+	HistoryRepo     database.HistoryRepositoryInterface
+	OperationMode   string
+	OrganizeSkipped bool
 
 	Broadcaster progressBroadcaster
 	Updater     resultstore.ResultUpdater
@@ -160,6 +166,8 @@ type rescrapePhaseInputs struct {
 	persister persister
 
 	// additional dependencies for full rescrape sequence
+	HistoryRepo database.HistoryRepositoryInterface
+
 	Finder      resultstore.FileFinder // for FindFileForMovieID and GetRevision
 	Fs          afero.Fs               // for poster cleanup
 	TempDir     string                 // for poster cleanup paths

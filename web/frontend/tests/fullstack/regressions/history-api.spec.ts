@@ -33,7 +33,7 @@
  * that contract.
  */
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { BACKEND_BASE, loginAgainstRealBackend } from '../helpers';
+import { BACKEND_BASE, loginAgainstRealBackend, submitScrape, submitOrganize, waitForJobCompletion, DEFAULT_INPUT_DIR, seedInputFiles } from '../helpers';
 
 interface HistoryListResponse {
 	records: unknown[];
@@ -76,14 +76,23 @@ async function getHistoryStats(api: APIRequestContext): Promise<HistoryStats> {
 }
 
 test.describe('History API: real contract against the e2emock backend', () => {
+	async function clearHistory(api: APIRequestContext): Promise<void> {
+		const resp = await getHistory(api, { limit: 1000 });
+		for (const record of resp.records) {
+			const id = String((record as Record<string, unknown>).id);
+			await api.delete(`${BACKEND_BASE}/api/v1/history/${id}`);
+		}
+	}
+
 	test('GET /history returns the well-formed empty-state response', async ({
 		request,
 	}: {
 		request: APIRequestContext;
 	}) => {
 		await loginAgainstRealBackend(request);
+		await clearHistory(request);
 
-		// The history table is empty (nothing writes to it — see spec header).
+		// The history table is empty (after clearing any rows from prior specs).
 		// The empty-state contract: records is an empty array (not null),
 		// total is 0, + limit/offset echo the request. The dashboard's
 		// "Recent Runs" list renders "No operations recorded yet." off this.
@@ -272,3 +281,57 @@ async function api_deleteHistoryBulk(
 		: '';
 	return api.delete(`${BACKEND_BASE}/api/v1/history${query}`);
 }
+
+test.describe('History happy path — records appear after real scrape+organize', () => {
+	test('scrape+organize writes history rows; list+stats reflect activity; delete removes one', async ({
+		request,
+	}: {
+		request: APIRequestContext;
+	}) => {
+		await loginAgainstRealBackend(request);
+		await seedInputFiles(['GOOD-003.mp4']);
+
+		const jobId = await submitScrape(request, { files: [`${DEFAULT_INPUT_DIR}/GOOD-003.mp4`] });
+		await waitForJobCompletion(request, jobId);
+		await submitOrganize(request, jobId, `/tmp/javinizer-e2e-output/history-test-${Date.now()}`);
+		// Wait for the organize goroutine to transition the job to 'organized'
+		let organized = false;
+		for (let i = 0; i < 30; i++) {
+			const resp = await request.get(`${BACKEND_BASE}/api/v1/batch/${jobId}`);
+			const job = await resp.json();
+			if (job.status === 'organized') { organized = true; break; }
+			await new Promise((r) => setTimeout(r, 1000));
+		}
+		expect(organized, 'job must reach organized status').toBeTruthy();
+
+		const listResp = await request.get(`${BACKEND_BASE}/api/v1/history?limit=50`);
+		expect(listResp.ok(), 'GET /history must return 200 after scrape+organize').toBeTruthy();
+		const list = (await listResp.json()) as HistoryListResponse;
+		expect(list.total, 'history total must be > 0 after scrape+organize').toBeGreaterThan(0);
+		expect(list.records.length, 'history records must be non-empty').toBeGreaterThan(0);
+
+		const operations = list.records.map((r) => (r as Record<string, unknown>).operation);
+		expect(operations, 'must contain a scrape record').toContain('scrape');
+		expect(operations, 'must contain an organize record').toContain('organize');
+		const organizeRecord = list.records.find((r) => (r as Record<string, unknown>).operation === 'organize');
+		expect(organizeRecord, 'organize record must exist').toBeTruthy();
+		expect((organizeRecord as Record<string, unknown>).status, 'organize record must be success').toBe('success');
+
+		const statsResp = await request.get(`${BACKEND_BASE}/api/v1/history/stats`);
+		expect(statsResp.ok()).toBeTruthy();
+		const stats = (await statsResp.json()) as HistoryStats;
+		expect(stats.total, 'stats total must be > 0').toBeGreaterThan(0);
+		expect(stats.success, 'stats success must be > 0').toBeGreaterThan(0);
+		expect(stats.by_operation.scrape, 'stats scrape count must be > 0').toBeGreaterThan(0);
+		expect(stats.by_operation.organize, 'stats organize count must be > 0').toBeGreaterThan(0);
+
+		const firstRecord = list.records[0] as Record<string, unknown>;
+		const recordId = String(firstRecord.id);
+		const delResp = await api_deleteHistory(request, recordId);
+		expect(delResp.ok(), 'DELETE must succeed for a valid id').toBeTruthy();
+
+		const afterResp = await request.get(`${BACKEND_BASE}/api/v1/history?limit=50`);
+		const after = (await afterResp.json()) as HistoryListResponse;
+		expect(after.total, 'total must decrease by 1 after delete').toBe(list.total - 1);
+	});
+});

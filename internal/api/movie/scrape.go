@@ -2,8 +2,12 @@ package movie
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"net/url"
+	"regexp"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/core"
@@ -12,6 +16,34 @@ import (
 
 	contracts "github.com/javinizer/javinizer-go/internal/api/contracts"
 )
+
+var movieEmbeddedURLRe = regexp.MustCompile(`(?i)https?://[^\s/]+@`)
+var movieQueryURLRe = regexp.MustCompile(`(?i)(https?://[^\s?#]+)[?#][^\s]+`)
+
+func redactEmbeddedURLs(s string) string {
+	s = movieEmbeddedURLRe.ReplaceAllString(s, "https://redacted:redacted@")
+	s = movieQueryURLRe.ReplaceAllString(s, "$1")
+	return s
+}
+
+func redactURLCredentials(input string) string {
+	u, err := url.Parse(input)
+	if err != nil {
+		return "redacted"
+	}
+	if u.Host == "" {
+		if strings.EqualFold(u.Scheme, "http") || strings.EqualFold(u.Scheme, "https") {
+			return "redacted"
+		}
+		return input
+	}
+	if u.User != nil {
+		u.User = url.UserPassword("redacted", "redacted")
+	}
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
 
 // scrapeMovie godoc
 // @Summary Scrape movie metadata
@@ -73,10 +105,34 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		}
 		result, _, err := wf.Scrape(scrapeCtx, cmd)
 		if scrapeCtx.Err() != nil {
+			if deps.HistoryRepo != nil && !errors.Is(scrapeCtx.Err(), context.Canceled) {
+				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer auditCancel()
+				safeInput := redactURLCredentials(cmd.RawInput)
+				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
+					MovieID:      safeInput,
+					Operation:    models.HistoryOpScrape,
+					OriginalPath: safeInput,
+					Status:       models.HistoryStatusFailed,
+					ErrorMessage: "scrape timed out",
+				})
+			}
 			c.JSON(http.StatusGatewayTimeout, contracts.ErrorResponse{Error: "scrape timed out"})
 			return
 		}
 		if err != nil {
+			if deps.HistoryRepo != nil && !errors.Is(err, context.Canceled) {
+				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer auditCancel()
+				safeInput := redactURLCredentials(cmd.RawInput)
+				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
+					MovieID:      safeInput,
+					Operation:    models.HistoryOpScrape,
+					OriginalPath: safeInput,
+					Status:       models.HistoryStatusFailed,
+					ErrorMessage: redactEmbeddedURLs(err.Error()),
+				})
+			}
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
@@ -84,10 +140,40 @@ func scrapeMovie(deps MovieDeps) gin.HandlerFunc {
 		if result.Status == scrape.StatusFailed {
 			errMsg := "Movie not found"
 			if result.Message != "" {
-				errMsg = result.Message
+				errMsg = redactEmbeddedURLs(result.Message)
+			}
+			if deps.HistoryRepo != nil {
+				auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer auditCancel()
+				safeInput := redactURLCredentials(cmd.RawInput)
+				movieID := safeInput
+				for _, sr := range result.ScraperResults {
+					if sr.ID != "" {
+						movieID = sr.ID
+						break
+					}
+				}
+				_ = deps.HistoryRepo.Create(auditCtx, &models.History{
+					MovieID:      movieID,
+					Operation:    models.HistoryOpScrape,
+					OriginalPath: safeInput,
+					Status:       models.HistoryStatusFailed,
+					ErrorMessage: errMsg,
+				})
 			}
 			c.JSON(http.StatusNotFound, contracts.ErrorResponse{Error: errMsg})
 			return
+		}
+
+		if deps.HistoryRepo != nil && result.Movie != nil {
+			auditCtx, auditCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer auditCancel()
+			_ = deps.HistoryRepo.Create(auditCtx, &models.History{
+				MovieID:      result.Movie.ID,
+				Operation:    models.HistoryOpScrape,
+				OriginalPath: redactURLCredentials(cmd.RawInput),
+				Status:       models.HistoryStatusSuccess,
+			})
 		}
 
 		// Generate temp poster for the scraped movie.

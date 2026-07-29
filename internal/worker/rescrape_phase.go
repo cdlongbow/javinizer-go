@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -140,7 +141,9 @@ func (p *rescrapePhase) CompleteRescrape(inputs rescrapePhaseInputs, filePath st
 		}
 	}
 
-	return &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Status: models.RescrapeStatusSuccess}, nil
+	rescrapeResult := &RescrapeResult{OrphanedMovieIDs: orphanedIDs, Status: models.RescrapeStatusSuccess}
+	auditRescrapeSuccess(inputs, movieID, filePath)
+	return rescrapeResult, nil
 }
 
 // singleScrapeWork was removed. ScrapeSingle now calls
@@ -167,12 +170,33 @@ func withRescrapeStatus(lc rescrapeLifecycle, fn func() (*RescrapeResult, *resul
 	}
 	if err != nil {
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+		if lc.inputs.HistoryRepo != nil {
+			movieID := lc.lookup.OldMovieID
+			if movieResult != nil && movieResult.Movie != nil {
+				movieID = movieResult.Movie.ID
+			}
+			auditRescrapeFailure(lc.inputs, movieID, lc.lookup.FilePath, err)
+		}
 		return nil, err
 	}
 
+	if outcome == nil {
+		return nil, nil
+	}
 	switch outcome.Status {
 	case models.RescrapeStatusGone, models.RescrapeStatusConflict, models.RescrapeStatusFailed:
 		CleanupMoviePosters(lc.inputs.Fs, lc.inputs.TempDir, lc.inputs.JobID, cleanupMovie())
+		if lc.inputs.HistoryRepo != nil {
+			movieID := lc.lookup.OldMovieID
+			if movieResult != nil && movieResult.Movie != nil {
+				movieID = movieResult.Movie.ID
+			}
+			errMsg := outcome.Error
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("rescrape %s", outcome.Status)
+			}
+			auditRescrapeFailure(lc.inputs, movieID, lc.lookup.FilePath, errors.New(errMsg))
+		}
 		return outcome, nil
 	}
 
