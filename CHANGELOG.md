@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v1.4.0] - 2026-07-29
+
+### Added
+
+- Wire history record creation during scrape/organize (#171)
+- Redesign review page with sidebar layout and UX improvements (#170)
+
+### Fixed
+
+- Correct actress panel spacing, dynamic grids, and single-column layout (#175)
+- Honor unknown_actress_mode=skip in GroupActress @Unknown substitution (#174)
+- Clear error when path overhead exceeds max_path_length + CJK rune truncation (#173)
+- Match plain numeric IDs in itemIDRegex (#172)
+
 ## [v1.3.3] - 2026-07-24
 
 ### Added
