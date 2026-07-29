@@ -2,6 +2,7 @@ import { onDestroy, onMount, untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
+import { VIEW_URL_PARAM, viewModeToUrlParam as sharedViewModeToUrlParam, type ReviewViewMode } from '$lib/utils/review-tab-sync';
 import type { Page } from '@sveltejs/kit';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
@@ -114,7 +115,16 @@ export function createReviewState(pageStore: Page) {
 	let showFieldScraperSources = $state(false);
 	const SHOW_FIELD_SCRAPER_SOURCES_KEY = 'javinizer.review.showFieldScraperSources';
 	const VIEW_MODE_KEY = 'javinizer.review.viewMode';
-	let viewMode = $state<'detail' | 'grid-poster' | 'grid-cover'>('detail');
+	const VIEW_MODE_URL_PARAM = VIEW_URL_PARAM;
+	type ViewMode = ReviewViewMode;
+	const viewModeToUrlParam = sharedViewModeToUrlParam;
+	function urlParamToViewMode(param: string | null): ViewMode | null {
+		if (param === 'detail') return 'detail';
+		if (param === 'poster') return 'grid-poster';
+		if (param === 'cover') return 'grid-cover';
+		return null;
+	}
+	let viewMode = $state<ViewMode>('detail');
 	let viewModeInitialized = $state(false);
 	let posterCropStatesStorageKey = $derived(`javinizer.review.posterCropStates.${jobId}`);
 	let editedMoviesStorageKey = $derived(`javinizer.review.editedMovies.${jobId}`);
@@ -150,6 +160,8 @@ export function createReviewState(pageStore: Page) {
 
 	let showPosterCropModal = $state(false);
 	let showSourceViewerModal = $state(false);
+	let showOutputPreviewModal = $state(false);
+	let showImageManagerModal = $state(false);
 	let posterCropLoadError = $state<string | null>(null);
 	let cropSourceURL = $state('');
 	let cropImageElement = $state<HTMLImageElement | null>(null);
@@ -1179,7 +1191,15 @@ export function createReviewState(pageStore: Page) {
 		if (browser) {
 			showFieldScraperSources = localStorage.getItem(SHOW_FIELD_SCRAPER_SOURCES_KEY) === 'true';
 			const savedViewMode = localStorage.getItem(VIEW_MODE_KEY);
-			if (
+			const urlViewMode = urlParamToViewMode(
+				new URL(window.location.href).searchParams.get(VIEW_MODE_URL_PARAM),
+			);
+			if (urlViewMode) {
+				// An explicit ?view= param wins over storage and config: the URL is
+				// user-authored state (shared link, refresh), so 'detail' IS restored
+				// here even though it is not restored from localStorage below.
+				viewMode = urlViewMode;
+			} else if (
 				savedViewMode === 'grid-cover' ||
 				savedViewMode === 'grid-poster' ||
 				savedViewMode === 'grid'
@@ -1318,6 +1338,9 @@ export function createReviewState(pageStore: Page) {
 		set viewMode(v) {
 			viewMode = v;
 		},
+		get viewModeInitialized() {
+			return viewModeInitialized;
+		},
 		get organizeProgress() {
 			return organizeProgress;
 		},
@@ -1431,6 +1454,18 @@ export function createReviewState(pageStore: Page) {
 		},
 		set showSourceViewerModal(v) {
 			showSourceViewerModal = v;
+		},
+		get showOutputPreviewModal() {
+			return showOutputPreviewModal;
+		},
+		set showOutputPreviewModal(v) {
+			showOutputPreviewModal = v;
+		},
+		get showImageManagerModal() {
+			return showImageManagerModal;
+		},
+		set showImageManagerModal(v) {
+			showImageManagerModal = v;
 		},
 		openSourceViewerModal,
 		loadSources,
