@@ -79,31 +79,6 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 
 	sourceDir := filepath.Dir(match.Path)
 	parentDir := filepath.Dir(sourceDir)
-	baseDirLen := len(parentDir)
-	if len(destDir) > baseDirLen {
-		baseDirLen = len(destDir)
-	}
-	overheadBytes := baseDirLen + 2 + len(pc.FileName)
-	folderMaxBytes := 0
-	if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
-		folderMaxBytes = s.config.MaxPathLength - overheadBytes
-	}
-
-	folderName := pc.FolderName
-	if folderMaxBytes > 0 {
-		var err error
-		folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate folder name: %w", err)
-		}
-		folderName = template.SanitizeFolderPath(folderName)
-		if folderName == "" {
-			folderName = template.SanitizeFolderPath(match.MovieID)
-			if folderName == "" {
-				folderName = "unknown"
-			}
-		}
-	}
 
 	var targetDir string
 	targetPath := ""
@@ -120,23 +95,62 @@ func (s *inPlaceStrategy) Plan(match models.FileMatchInfo, movie *models.Movie, 
 		if err != nil {
 			return nil, err
 		}
-
-		if isDedicated {
-			currentFolderName := filepath.Base(sourceDir)
-			if currentFolderName != folderName {
-				inPlace = true
-				oldDir = sourceDir
-				targetDir = filepath.Join(filepath.Dir(sourceDir), folderName)
-				targetPath = filepath.Join(targetDir, pc.FileName)
-				willMove = true
-			} else {
-				skipInPlaceReason = "folder already has correct name"
-			}
-		} else {
-			skipInPlaceReason = "folder contains mixed IDs"
-		}
+		_ = isDedicated
 	} else {
 		skipInPlaceReason = "matcher not set"
+	}
+
+	// Compute the budgeted folder name only when the folder will be used.
+	// For non-dedicated in-place folders, the folder name is never used.
+	folderName := pc.FolderName
+	folderWillRename := s.config.OperationMode == operationmode.OperationModeOrganize || isDedicated
+	if folderWillRename {
+		// In in-place mode, the target is under the source directory tree,
+		// so destDir is irrelevant for overhead calculation.
+		baseDir := parentDir
+		if s.config.OperationMode == operationmode.OperationModeOrganize && !isDedicated {
+			baseDir = destDir
+		}
+		fullOverhead := filepath.Join(baseDir, "X", pc.FileName)
+		overheadBytes := len(fullOverhead) - len("X")
+		folderMaxBytes := 0
+		if s.config.MaxPathLength > 0 && overheadBytes < s.config.MaxPathLength {
+			folderMaxBytes = s.config.MaxPathLength - overheadBytes
+		}
+		if s.config.MaxPathLength > 0 && folderMaxBytes <= 0 {
+			return nil, fmt.Errorf("path validation failed: directory and filename overhead (%d bytes) already exceeds max_path_length (%d); reduce the path or increase max_path_length", overheadBytes, s.config.MaxPathLength)
+		}
+		if folderMaxBytes > 0 {
+			var err error
+			folderName, err = s.templateEngine.ExecuteWithMaxBytes(s.config.FolderFormat, pc.Ctx, folderMaxBytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate folder name: %w", err)
+			}
+			folderName = template.SanitizeFolderPath(folderName)
+			if folderName == "" {
+				folderName = template.SanitizeFolderPath(match.MovieID)
+				if folderName == "" {
+					folderName = "unknown"
+				}
+			}
+		}
+	}
+
+	if s.matcher != nil && isDedicated {
+		currentFolderName := filepath.Base(sourceDir)
+		if currentFolderName != folderName {
+			inPlace = true
+			oldDir = sourceDir
+			targetDir = filepath.Join(filepath.Dir(sourceDir), folderName)
+			targetPath = filepath.Join(targetDir, pc.FileName)
+			willMove = true
+		} else {
+			skipInPlaceReason = "folder already has correct name"
+		}
+	} else if s.matcher == nil {
+		skipInPlaceReason = "matcher not set"
+	} else {
+		skipInPlaceReason = "folder contains mixed IDs"
 	}
 
 	if !inPlace && s.config.OperationMode == operationmode.OperationModeOrganize {

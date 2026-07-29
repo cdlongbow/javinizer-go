@@ -2,6 +2,7 @@ package template
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -127,39 +128,107 @@ func (e *Engine) Execute(template string, ctx *Context) (string, error) {
 
 // ExecuteWithMaxBytes renders tmpl so the rendered output stays within maxBytes, truncating the title when needed.
 func (e *Engine) ExecuteWithMaxBytes(tmpl string, ctx *Context, maxBytes int) (string, error) {
-	sentinel := "\x00MAXBYTES\x00"
-	frameCtx := ctx.Clone()
-	frameCtx.Title = sentinel
-	frameCtx.OriginalTitle = sentinel
-
-	frame, err := e.Execute(tmpl, frameCtx)
-	if err != nil {
-		return e.Execute(tmpl, ctx)
+	if maxBytes <= 0 {
+		return "", fmt.Errorf("maxBytes must be positive, got %d", maxBytes)
 	}
-
-	frameBytes := len(frame) - strings.Count(frame, sentinel)*len(sentinel)
-	titleBudget := maxBytes - frameBytes
-	if titleBudget <= 0 {
-		return e.Execute(tmpl, ctx)
-	}
-
-	titleBytes := len(ctx.Title)
-	if titleBytes <= titleBudget {
-		return e.Execute(tmpl, ctx)
-	}
-
-	truncatedCtx := ctx.Clone()
-	truncated := e.TruncateTitleBytes(ctx.Title, titleBudget)
-	truncatedCtx.Title = truncated
-	if ctx.OriginalTitle == ctx.Title {
-		truncatedCtx.OriginalTitle = truncated
-	} else {
-		truncatedCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, titleBudget)
-	}
-
-	return e.Execute(tmpl, truncatedCtx)
+	return e.executeOrClamp(tmpl, ctx, maxBytes)
 }
 
+func (e *Engine) executeOrClamp(tmpl string, ctx *Context, maxBytes int) (string, error) {
+	result, err := e.Execute(tmpl, ctx)
+	if err != nil {
+		if !errors.Is(err, errOutputLimit) {
+			return "", err
+		}
+		return e.clampResult(tmpl, ctx, "", maxBytes)
+	}
+	return e.clampResult(tmpl, ctx, result, maxBytes)
+}
+
+func (e *Engine) clampResult(tmpl string, ctx *Context, result string, maxBytes int) (string, error) {
+	if result != "" && len(result) <= maxBytes {
+		return result, nil
+	}
+	// renderBudget renders the template with all title fields truncated to the given byte budget.
+	renderBudget := func(budget int) (string, int, error) {
+		truncCtx := ctx.Clone()
+		truncCtx.Title = e.TruncateTitleBytes(ctx.Title, budget)
+		if ctx.OriginalTitle != ctx.Title {
+			truncCtx.OriginalTitle = e.TruncateTitleBytes(ctx.OriginalTitle, budget)
+		} else {
+			truncCtx.OriginalTitle = truncCtx.Title
+		}
+		for lang, tr := range ctx.Translations {
+			tr.Title = e.TruncateTitleBytes(ctx.Translations[lang].Title, budget)
+			tr.OriginalTitle = e.TruncateTitleBytes(ctx.Translations[lang].OriginalTitle, budget)
+			truncCtx.Translations[lang] = tr
+		}
+		candidate, err := e.Execute(tmpl, truncCtx)
+		if err != nil {
+			return "", 0, err
+		}
+		return candidate, len(candidate), nil
+	}
+	// Find the maximum byte budget across all title fields.
+	maxBudget := len(ctx.Title)
+	if len(ctx.OriginalTitle) > maxBudget {
+		maxBudget = len(ctx.OriginalTitle)
+	}
+	for _, tr := range ctx.Translations {
+		if len(tr.Title) > maxBudget {
+			maxBudget = len(tr.Title)
+		}
+		if len(tr.OriginalTitle) > maxBudget {
+			maxBudget = len(tr.OriginalTitle)
+		}
+	}
+	shortestLen := len(result)
+	if shortestLen == 0 {
+		shortestLen = maxBytes + 1
+	}
+	// Binary search for the largest budget that fits.
+	// For monotonic templates (shorter title = shorter output), this finds the optimal
+	// in O(log N). For non-monotonic templates (conditionals), try a few bounded probes.
+	lo, hi := 0, maxBudget
+	bestFit := ""
+	foundFit := false
+	for lo <= hi {
+		mid := lo + (hi-lo)/2
+		candidate, candLen, err := renderBudget(mid)
+		if err != nil {
+			hi = mid - 1
+			continue
+		}
+		if candLen < shortestLen {
+			shortestLen = candLen
+		}
+		if candLen <= maxBytes {
+			bestFit = candidate
+			foundFit = true
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	if foundFit {
+		return bestFit, nil
+	}
+	// Bounded probes for non-monotonic templates where binary search misses valid budgets.
+	// This happens when conditionals switch branches at rune boundaries (e.g. emoji titles
+	// where a single rune is 4 bytes; binary search may skip the 4-byte budget).
+	for _, budget := range []int{0, 1, 2, 3, 4} {
+		candidate, candLen, err := renderBudget(budget)
+		if err == nil {
+			if candLen < shortestLen {
+				shortestLen = candLen
+			}
+			if candLen <= maxBytes {
+				return candidate, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("folder template cannot fit within the available %d-byte budget by truncating title fields; shortest rendering is %d bytes; shorten the folder template or destination path, or increase max_path_length", maxBytes, shortestLen)
+} // ExecuteWithContext processes a template string with cancellation support and output limits.
 // ExecuteWithContext processes a template string with cancellation support and output limits.
 func (e *Engine) ExecuteWithContext(execCtx context.Context, template string, ctx *Context) (string, error) {
 	if execCtx == nil {
@@ -317,9 +386,11 @@ func (e *Engine) Validate(template string) error {
 	return nil
 }
 
+var errOutputLimit = fmt.Errorf("output exceeds maximum")
+
 func (e *Engine) ensureOutputWithinLimit(output string) error {
 	if len(output) > e.options.MaxOutputBytes {
-		return fmt.Errorf("rendered template size %d exceeds maximum %d bytes", len(output), e.options.MaxOutputBytes)
+		return fmt.Errorf("rendered template size %d exceeds maximum %d bytes: %w", len(output), e.options.MaxOutputBytes, errOutputLimit)
 	}
 	return nil
 }
@@ -649,7 +720,11 @@ func newTagRegistry() map[string]tagResolver {
 
 // TruncateTitle smartly truncates a title to maxLen characters
 func (e *Engine) TruncateTitle(title string, maxLen int) string {
-	if maxLen <= 0 || len(title) <= maxLen {
+	if maxLen <= 0 {
+		return title
+	}
+	runes := []rune(title)
+	if len(runes) <= maxLen {
 		return title
 	}
 
@@ -659,33 +734,22 @@ func (e *Engine) TruncateTitle(title string, maxLen int) string {
 
 	if isCJK {
 		if maxLen > 3 {
-			runes := []rune(title)
-			if len(runes) > maxLen-3 {
-				return string(runes[:maxLen-3]) + marker
-			}
+			return string(runes[:maxLen-3]) + marker
 		}
-		return title
-	}
-
-	runes := []rune(title)
-	if maxLen > 3 {
-		if len(runes) > maxLen-3 {
-			truncated := runes[:maxLen-3]
-			truncStr := string(truncated)
-			lastSpace := strings.LastIndex(truncStr, " ")
-			if lastSpace > 0 {
-				return truncStr[:lastSpace] + marker
-			}
-			return truncStr + marker
-		}
-		return title
-	}
-
-	// maxLen <= 3: truncate at rune boundary
-	if len(runes) > maxLen {
 		return string(runes[:maxLen])
 	}
-	return title
+
+	if maxLen > 3 {
+		truncated := runes[:maxLen-3]
+		truncStr := string(truncated)
+		lastSpace := strings.LastIndex(truncStr, " ")
+		if lastSpace > 0 {
+			return truncStr[:lastSpace] + marker
+		}
+		return truncStr + marker
+	}
+
+	return string(runes[:maxLen])
 }
 
 // TruncateTitleBytes smartly truncates a title to fit within maxBytes (byte length)

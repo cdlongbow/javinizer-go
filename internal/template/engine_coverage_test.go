@@ -21,8 +21,8 @@ func TestExecuteWithMaxBytes_OriginalTitleDiffersFromTitle(t *testing.T) {
 	// maxBytes so small that title truncation is required
 	got, err := e.ExecuteWithMaxBytes("<ORIGINALTITLE>", ctx, 8)
 	require.NoError(t, err)
-	// Should truncate OriginalTitle independently since Title != OriginalTitle
-	assert.Contains(t, got, "...")
+	assert.LessOrEqual(t, len(got), 8)
+	assert.NotEqual(t, "Japanese Title", got, "should be truncated")
 }
 
 func TestExecuteWithMaxBytes_FrameErrorFallsBack(t *testing.T) {
@@ -31,17 +31,14 @@ func TestExecuteWithMaxBytes_FrameErrorFallsBack(t *testing.T) {
 	// Template too large: both frame and fallback Execute calls fail
 	_, err := e.ExecuteWithMaxBytes("<ID> - <TITLE>", ctx, 100)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "exceeds maximum")
 }
 
 func TestExecuteWithMaxBytes_TitleBudgetExhausted(t *testing.T) {
 	e := NewEngine()
 	ctx := &Context{ID: "ABC-123", Title: "T", ReleaseYear: 2024}
 	// maxBytes so small that titleBudget <= 0 after subtracting frame bytes
-	got, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<YEAR>)", ctx, 5)
-	require.NoError(t, err)
-	// Falls back to Execute without truncation
-	assert.Contains(t, got, "ABC-123")
+	_, err := e.ExecuteWithMaxBytes("<ID> - <TITLE> (<YEAR>)", ctx, 5)
+	require.Error(t, err, "should error when fixed content exceeds maxBytes")
 }
 
 func TestExecuteWithMaxBytes_TitleFitsInBudget(t *testing.T) {
@@ -295,9 +292,9 @@ func TestTruncateTitle_NonCJKMaxLenGt3RunesFit(t *testing.T) {
 
 func TestTruncateTitle_CJKMaxLenLTE3(t *testing.T) {
 	e := NewEngine()
-	// CJK with maxLen <= 3, returns title (can't fit marker)
+	// CJK with maxLen <= 3: truncates at rune boundary (no marker)
 	result := e.TruncateTitle("日本語タイトル", 3)
-	assert.Equal(t, "日本語タイトル", result)
+	assert.Equal(t, "日本語", result)
 }
 
 func TestTruncateTitle_NonCJKMaxLenLTE3NoTruncation(t *testing.T) {
