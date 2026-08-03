@@ -178,6 +178,11 @@ func TestDownloadPoster_PromoteFailureIsCleanError(t *testing.T) {
 	fs := renameFailFs{afero.NewMemMapFs()}
 	// Undecodable payload: the geometry path bails to the direct-promote fallback.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Binary-typed so the content guard lets it through: an undecodable
+		// payload is exactly what pushes the geometry path to the
+		// direct-promote fallback under test here. (A declared text/* type
+		// would be refused earlier as provably-not-media.)
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write([]byte("definitely not jpeg"))
 	}))
 	t.Cleanup(srv.Close)
@@ -339,6 +344,10 @@ func TestDownloadPoster_UndecodableKeepsDirectDownloadSuccess(t *testing.T) {
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
+		// Binary-typed: undeclared bytes sniff to text/plain, which the media
+		// guard now refuses by design; this test asserts the lenient fallback
+		// for undecodable-but-binary payloads.
+		w.Header().Set("Content-Type", "application/octet-stream")
 		_, _ = w.Write(raw)
 	}))
 	t.Cleanup(srv.Close)

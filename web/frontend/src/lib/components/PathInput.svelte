@@ -18,6 +18,10 @@
 		escapeValue?: string;
 		drillOnSelect?: boolean;
 		scope?: 'operation' | 'configure';
+		id?: string;
+		ariaDescribedby?: string;
+		ariaInvalid?: boolean;
+		required?: boolean;
 		class?: string;
 	}
 
@@ -33,6 +37,10 @@
 		escapeValue,
 		drillOnSelect = false,
 		scope = 'operation',
+		id,
+		ariaDescribedby,
+		ariaInvalid = false,
+		required = false,
 		class: className = ''
 	}: Props = $props();
 
@@ -192,6 +200,8 @@
 				selectSuggestion(displayedSuggestions[activeIndex]);
 				return;
 			}
+			focused = false;
+			clearSuggestions();
 			onnavigate?.(value.trim());
 		} else if (e.key === 'Escape') {
 			if (escapeValue !== undefined) value = escapeValue;
@@ -268,7 +278,12 @@
 <div class="relative flex-1">
 	<input
 		bind:this={inputEl}
+		{id}
 		type="text"
+		aria-describedby={ariaDescribedby}
+		aria-invalid={ariaInvalid}
+		aria-required={required}
+		{required}
 		bind:value
 		onkeydown={handleKeydown}
 		oninput={handleInput}

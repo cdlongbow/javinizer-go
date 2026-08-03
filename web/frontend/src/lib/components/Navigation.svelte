@@ -77,18 +77,19 @@
 	<div class="container mx-auto px-4">
 		<div class="flex items-center justify-between h-16">
 			<!-- Logo -->
-			<a href="/" class="flex items-center gap-2 font-bold text-xl transition-opacity duration-200 hover:opacity-80">
+			<a href="/" class="flex shrink-0 items-center gap-2 font-bold text-xl transition-opacity duration-200 hover:opacity-80">
 				<Film class="h-6 w-6 text-primary" />
-				<span>{m.nav_app_name()}</span>
+				<span class="hidden sm:inline">{m.nav_app_name()}</span>
 			</a>
 
 			<!-- Nav Links -->
-			<div class="flex items-center gap-1">
+			<div class="min-w-0 flex items-center gap-1">
+				<div class="min-w-0 flex items-center gap-1 overflow-x-auto">
 				{#each navItems as item}
 					{@const Icon = item.icon}
 					<a
 						href={item.href}
-						class="flex items-center gap-2 px-4 py-2 rounded-md transition-all duration-200 {currentPath ===
+						class="flex shrink-0 items-center gap-2 px-2 py-2 rounded-md transition-all duration-200 sm:px-4 {currentPath ===
 						item.href
 							? 'bg-primary text-primary-foreground shadow-sm -translate-y-0.5'
 							: 'hover:bg-accent hover:-translate-y-px'}"
@@ -98,24 +99,33 @@
 					</a>
 				{/each}
 
+				</div>
+
 				<!-- Update available indicator (hidden when up-to-date / disabled).
 				Browser-only: UpdateIndicator uses TanStack Query (useQueryClient),
 				which requires a QueryClientProvider. The SSR branch of +layout.svelte
 				renders Navigation without a provider, so mounting this during SSR
 				would throw. The indicator is an interactive, API-polling widget with
-				no SSR value, so gating on `browser` is the correct fix. -->
-				{#if browser}
-					<UpdateIndicator />
-				{/if}
+				no SSR value, so gating on `browser` is the correct fix.
+				The fixed-size grid cell reserves the slot pre-hydration (no layout
+				shift) and MUST stay OUTSIDE the overflow-x-auto scroll container
+				above: a non-visible overflow-x makes overflow-y compute to auto, so
+				the indicator's absolute popover would be clipped into the nav's
+				scroll area and render "inline" instead of overlaying the page. -->
+				<div class="grid h-10 w-10 shrink-0 place-items-center">
+					{#if browser}<UpdateIndicator />{/if}
+				</div>
 
 				<!-- Settings & Logs dropdown -->
-				<div class="relative" data-submenu>
+				<div class="relative shrink-0" data-submenu>
 					<button
 						type="button"
 						onclick={toggleSubMenu}
+						aria-label={m.nav_settings()}
 						aria-expanded={subMenuOpen}
+						aria-controls="navigation-settings-menu"
 						aria-haspopup="true"
-						class="flex items-center gap-1.5 px-3 py-2 rounded-md transition-all duration-200 {isSubMenuActive
+						class="flex shrink-0 items-center gap-1.5 px-2 py-2 rounded-md transition-all duration-200 sm:px-3 {isSubMenuActive
 							? 'bg-primary text-primary-foreground shadow-sm -translate-y-0.5'
 							: 'hover:bg-accent hover:-translate-y-px'}"
 					>
@@ -127,7 +137,8 @@
 
 					{#if subMenuOpen}
 						<div
-							class="absolute right-0 top-full mt-1 w-48 rounded-lg border bg-card p-1 shadow-lg"
+							id="navigation-settings-menu"
+							class="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border bg-card p-1 shadow-lg"
 							in:fly={{ y: -4, duration: 120 }}
 						>
 							<button
@@ -162,7 +173,7 @@
 				{#if authenticated}
 					<button
 						type="button"
-						class="flex items-center gap-2 px-4 py-2 rounded-md transition-all duration-200 hover:bg-accent hover:-translate-y-px hover:text-destructive"
+						class="flex shrink-0 items-center gap-2 px-2 py-2 rounded-md transition-all duration-200 hover:bg-accent hover:-translate-y-px hover:text-destructive sm:px-4"
 						onclick={() => onLogout?.()}
 						title={m.nav_logout()}
 					>

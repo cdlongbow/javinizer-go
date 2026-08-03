@@ -64,6 +64,53 @@ export type OperationMode =
 	| 'metadata-artwork'
 	| 'preview';
 
+export type VideoOperation =
+	| 'organize'
+	| 'rename-in-place'
+	| 'rename-file'
+	| 'leave-in-place'
+	| 'metadata-artwork';
+export type NFOOutputPolicy = 'write' | 'skip';
+export type MediaPolicy = 'missing' | 'replace' | 'skip';
+export type ScalarMergeStrategy =
+	| 'prefer-nfo'
+	| 'prefer-scraper'
+	| 'preserve-existing'
+	| 'fill-missing-only';
+export type ArrayMergeStrategy = 'merge' | 'replace';
+export type MergePreset = 'conservative' | 'gap-fill' | 'aggressive';
+
+export interface BatchApplyPlan {
+	version: 1;
+	video_operation: VideoOperation;
+	destination?: string;
+	nfo_output: NFOOutputPolicy;
+	media_policy: MediaPolicy;
+	merge?: {
+		scalar_strategy: ScalarMergeStrategy;
+		array_strategy: ArrayMergeStrategy;
+		source_preset?: MergePreset;
+	};
+}
+
+export interface ReviewApplyOverrides {
+	operation_mode?: OperationMode;
+	destination?: string;
+	skip_nfo?: boolean;
+	skip_download?: boolean;
+	overwrite_existing_media?: boolean;
+	preset?: MergePreset;
+	scalar_strategy?: ScalarMergeStrategy;
+	array_strategy?: ArrayMergeStrategy;
+	force_overwrite?: boolean;
+	preserve_nfo?: boolean;
+}
+
+export interface EffectiveApplyPlan {
+	plan: BatchApplyPlan;
+	merge_override: 'none' | 'force-overwrite' | 'preserve-nfo';
+}
+
 export interface BatchScrapeRequest {
 	files: string[];
 	strict: boolean;
@@ -81,6 +128,7 @@ export interface BatchScrapeRequest {
 	array_strategy?: 'merge' | 'replace';
 	operation_mode?: OperationMode; // Per-request override of config operation_mode
 	manual_inputs?: Record<string, string>; // Per-file manual input override keyed by file path; an ID scrapes as that ID (bypasses matcher), a URL scrapes with URL-compatible scrapers
+	apply_plan?: BatchApplyPlan;
 }
 
 export interface RescrapeRequest {
@@ -288,12 +336,7 @@ export interface BatchScrapeResponse {
 	job_id: string;
 }
 
-export type ScraperErrorKind =
-	| 'not_found'
-	| 'unavailable'
-	| 'rate_limited'
-	| 'blocked'
-	| 'unknown';
+export type ScraperErrorKind = 'not_found' | 'unavailable' | 'rate_limited' | 'blocked' | 'unknown';
 
 export interface FileResult {
 	result_id: string;
@@ -330,6 +373,7 @@ export interface BatchJobResponse {
 	operation_mode_override?: string;
 	update: boolean;
 	persist_error?: string;
+	apply_plan?: BatchApplyPlan;
 }
 
 export interface ProgressMessage {
@@ -586,7 +630,9 @@ export interface HealthResponse {
 }
 
 export interface UpdateRequest {
+	overrides?: ReviewApplyOverrides;
 	force_overwrite?: boolean;
+	overwrite_existing_media?: boolean;
 	preserve_nfo?: boolean;
 	preset?: 'conservative' | 'gap-fill' | 'aggressive';
 	scalar_strategy?:
@@ -601,6 +647,7 @@ export interface UpdateRequest {
 }
 
 export interface OrganizeRequest {
+	overrides?: ReviewApplyOverrides;
 	destination: string;
 	copy_only?: boolean;
 	link_mode?: 'hard' | 'soft';
@@ -614,6 +661,7 @@ export interface OrganizeResponse {
 }
 
 export interface OrganizePreviewRequest {
+	overrides?: ReviewApplyOverrides;
 	destination: string;
 	copy_only?: boolean;
 	link_mode?: 'hard' | 'soft';
@@ -638,6 +686,7 @@ export interface OrganizePreviewResponse {
 	trailer_path?: string; // Empty if trailer download disabled or no trailer URL
 	source_path?: string; // Original file path (for in-place modes)
 	operation_mode?: string;
+	effective_apply?: EffectiveApplyPlan;
 }
 
 export interface DisplayTitlePreviewRequest {
@@ -1273,6 +1322,13 @@ export interface DeleteEventsResponse {
 	message: string;
 }
 
+// One copy-pasteable upgrade command plus a stable semantic key the UI maps
+// to a localized label (mirrors internal/system.UpgradeCommand).
+export interface UpgradeCommand {
+	key: string;
+	command: string;
+}
+
 export interface VersionStatusResponse {
 	current: string;
 	latest: string;
@@ -1282,6 +1338,7 @@ export interface VersionStatusResponse {
 	source: string;
 	install_environment: 'docker' | 'desktop' | 'cli';
 	upgrade_instructions?: string;
+	upgrade_commands?: UpgradeCommand[];
 	error?: string;
 }
 

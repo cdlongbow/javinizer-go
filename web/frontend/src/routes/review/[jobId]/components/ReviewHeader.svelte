@@ -2,7 +2,9 @@
 	import Button from '$lib/components/ui/Button.svelte';
 	import { ChevronDown, ChevronUp, Image, LayoutGrid, List, LoaderCircle, Play, RefreshCw, Settings2, X, CheckSquare, Square, Trash2, RotateCcw, MousePointerClick, Save } from 'lucide-svelte';
 	import type { CompletenessTier } from '$lib/utils/completeness';
+	import type { ArrayMergeStrategy, MergePreset, ScalarMergeStrategy } from '$lib/api/types';
 	import * as m from '$lib/paraglide/messages';
+	import { withCustomReviewMergeStrategy } from '../stores/review-state.svelte';
 
 	interface Props {
 		isUpdateMode: boolean;
@@ -10,11 +12,18 @@
 		organizing: boolean;
 		movieResultsLength: number;
 		destinationPath: string;
+		operationMode?: string;
+		applyInvalid?: boolean;
 		viewMode?: 'detail' | 'grid-poster' | 'grid-cover';
 		forceOverwrite?: boolean;
 		preserveNfo?: boolean;
 		skipNfo?: boolean;
 		skipDownload?: boolean;
+		overwriteExistingMedia?: boolean;
+		applyPreset?: MergePreset;
+		applyScalarStrategy?: ScalarMergeStrategy;
+		applyArrayStrategy?: ArrayMergeStrategy;
+		usesLegacyApplyDefaults?: boolean;
 		selectedCount?: number;
 		allSelected?: boolean;
 		bulkExcluding?: boolean;
@@ -43,11 +52,18 @@
 		organizing,
 		movieResultsLength,
 		destinationPath,
+		operationMode = 'organize',
+		applyInvalid = false,
 		viewMode = $bindable<'detail' | 'grid-poster' | 'grid-cover'>('detail'),
 		forceOverwrite = $bindable(false),
 		preserveNfo = $bindable(false),
 		skipNfo = $bindable(false),
 		skipDownload = $bindable(false),
+		overwriteExistingMedia = $bindable(false),
+		applyPreset = $bindable<MergePreset | undefined>(undefined),
+		applyScalarStrategy = $bindable<ScalarMergeStrategy>('prefer-nfo'),
+		applyArrayStrategy = $bindable<ArrayMergeStrategy>('merge'),
+		usesLegacyApplyDefaults = false,
 		selectedCount = 0,
 		allSelected = false,
 		bulkExcluding = false,
@@ -77,6 +93,28 @@
 	$effect(() => {
 		if (preserveNfo) forceOverwrite = false;
 	});
+
+	// A preset implies its fixed strategy pair; the backend rejects a request
+	// carrying BOTH (preset contradicts strategies). Hand-editing a strategy
+	// must therefore clear the preset — this mirrors
+	// withCustomReviewMergeStrategy, the store-level rule the action bar
+	// already follows.
+	function chooseMergeStrategy(change: { scalar?: ScalarMergeStrategy; array?: ArrayMergeStrategy }) {
+		const next = withCustomReviewMergeStrategy(
+			{ destinationPath, forceOverwrite, preserveNfo, skipNfo, skipDownload, overwriteExistingMedia, applyPreset, applyScalarStrategy, applyArrayStrategy },
+			change
+		);
+		applyPreset = next.applyPreset;
+		applyScalarStrategy = next.applyScalarStrategy;
+		applyArrayStrategy = next.applyArrayStrategy;
+	}
+
+	function choosePreset(value: MergePreset | undefined) {
+		if (value === 'conservative') { applyScalarStrategy = 'preserve-existing'; applyArrayStrategy = 'merge'; }
+		if (value === 'gap-fill') { applyScalarStrategy = 'fill-missing-only'; applyArrayStrategy = 'merge'; }
+		if (value === 'aggressive') { applyScalarStrategy = 'prefer-scraper'; applyArrayStrategy = 'replace'; }
+		applyPreset = value;
+	}
 
 	let showOptions = $state(false);
 
@@ -154,7 +192,7 @@
 			{/snippet}
 		</Button>
 		{#if isUpdateMode}
-			<Button onclick={onUpdateAll} disabled={organizing}>
+			<Button onclick={onUpdateAll} disabled={organizing || applyInvalid}>
 				{#snippet children()}
 					{#if organizing}
 						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
@@ -165,7 +203,10 @@
 				{/snippet}
 			</Button>
 		{:else}
-			<Button onclick={onOrganizeAll} disabled={organizing || !canOrganize || !destinationPath.trim()}>
+			<!-- applyInvalid mirrors the sticky action bar + update-mode button:
+			with both NFO output and media downloads skipped, submitting would
+			send a plan the back-end rejects. -->
+			<Button onclick={onOrganizeAll} disabled={organizing || applyInvalid || !canOrganize || (operationMode === 'organize' && !destinationPath.trim())}>
 				{#snippet children()}
 					{#if organizing}
 						<LoaderCircle class="h-4 w-4 mr-2 animate-spin" />
@@ -267,7 +308,7 @@
 	</div>
 {/if}
 
-{#if isUpdateMode}
+{#if isUpdateMode || canOrganize}
 	<div class="mb-4">
 		<button
 			onclick={() => (showOptions = !showOptions)}
@@ -283,7 +324,9 @@
 		</button>
 
 		{#if showOptions}
+			{#if applyInvalid}<p class="mt-3 text-sm text-destructive" role="alert">{m.review_choose_output_alert()}</p>{/if}
 			<div class="grid gap-3 md:grid-cols-4 mt-3">
+				{#if isUpdateMode}
 				<label
 					class="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 cursor-pointer transition-colors"
 				>
@@ -312,6 +355,7 @@
 					</div>
 				</label>
 
+				{/if}
 				<label
 					class="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 cursor-pointer transition-colors"
 				>
@@ -331,7 +375,14 @@
 				>
 					<input
 						type="checkbox"
-						bind:checked={skipDownload}
+						checked={skipDownload}
+						onchange={(e) => {
+							skipDownload = e.currentTarget.checked;
+							// "Skip downloads" and "Replace existing media" are mutually
+							// exclusive: leaving both set sends skip_download +
+							// overwrite_existing_media, a 400 from the backend.
+							if (skipDownload) overwriteExistingMedia = false;
+						}}
 						class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary"
 					/>
 					<div class="flex-1">
@@ -339,6 +390,28 @@
 						<p class="text-xs text-muted-foreground">{m.review_skip_download_desc()}</p>
 					</div>
 				</label>
+
+				{#if isUpdateMode}
+				<label
+					class="flex items-center gap-3 p-3 rounded-lg border border-border bg-background hover:bg-accent/50 cursor-pointer transition-colors"
+				>
+					<input type="checkbox" bind:checked={overwriteExistingMedia} disabled={skipDownload} class="h-4 w-4 rounded border-input text-primary focus:ring-2 focus:ring-primary" />
+					<div class="flex-1"><span class="text-sm font-medium">{m.review_replace_existing_media()}</span><p class="text-xs text-muted-foreground">{m.review_replace_existing_media_desc()}</p></div>
+				</label>
+
+				<div class="grid gap-3 rounded-lg border bg-background p-3 md:col-span-4 md:grid-cols-3">
+					<label class="text-xs text-muted-foreground">{m.browse_quick_presets()}
+						<select class="mt-1 h-10 w-full rounded-md border bg-background px-2 text-sm" value={applyPreset ?? ''} disabled={forceOverwrite || preserveNfo} onchange={(e) => choosePreset((e.currentTarget.value || undefined) as MergePreset | undefined)}><option value="">{m.browse_clear_preset()}</option><option value="conservative">{m.browse_preset_conservative()}</option><option value="gap-fill">{m.browse_preset_gap_fill()}</option><option value="aggressive">{m.browse_preset_aggressive()}</option></select>
+					</label>
+					<label class="text-xs text-muted-foreground">{m.browse_scalar_fields()}
+						<select class="mt-1 h-10 w-full rounded-md border bg-background px-2 text-sm" value={applyScalarStrategy} disabled={forceOverwrite || preserveNfo} onchange={(e) => chooseMergeStrategy({ scalar: e.currentTarget.value as ScalarMergeStrategy })}><option value="prefer-nfo">{m.browse_prefer_nfo()}</option><option value="prefer-scraper">{m.browse_prefer_scraped()}</option><option value="preserve-existing">{m.browse_preserve_existing()}</option><option value="fill-missing-only">{m.browse_fill_missing_only()}</option></select>
+					</label>
+					<label class="text-xs text-muted-foreground">{m.browse_array_fields()}
+						<select class="mt-1 h-10 w-full rounded-md border bg-background px-2 text-sm" value={applyArrayStrategy} disabled={forceOverwrite || preserveNfo} onchange={(e) => chooseMergeStrategy({ array: e.currentTarget.value as ArrayMergeStrategy })}><option value="merge">{m.browse_merge()}</option><option value="replace">{m.browse_replace()}</option></select>
+					</label>
+					{#if usesLegacyApplyDefaults}<p class="text-xs text-muted-foreground md:col-span-3">{m.review_legacy_defaults_note()}</p>{/if}
+				</div>
+				{/if}
 			</div>
 		{/if}
 	</div>

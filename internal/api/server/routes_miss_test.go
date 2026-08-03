@@ -7,6 +7,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/javinizer/javinizer-go/internal/api/core"
 )
 
 // --- registerStaticWebRoutes with UI available (line 165-185) ---
@@ -46,7 +48,7 @@ func TestRegisterNoRouteHandler_WithUI_HTMLAccept(t *testing.T) {
 	}
 
 	router := gin.New()
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	// Test GET with HTML Accept header
 	req := httptest.NewRequest(http.MethodGet, "/some/page", nil)
@@ -60,6 +62,28 @@ func TestRegisterNoRouteHandler_WithUI_HTMLAccept(t *testing.T) {
 
 // --- registerNoRouteHandler with UI and HEAD method (line 198) ---
 
+func TestRegisterNoRouteHandler_PersonalizedHTMLIsPrivate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	assets := loadWebUIAssets()
+	if !assets.uiAvailable {
+		t.Skip("Web UI assets not available in test build")
+	}
+
+	router := gin.New()
+	rt := &core.APIRuntime{}
+	registerNoRouteHandler(router, assets, rt)
+
+	req := httptest.NewRequest(http.MethodGet, "/browse", nil)
+	req.Header.Set("Accept", "text/html")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "private, no-store", w.Header().Get("Cache-Control"))
+	assert.Equal(t, "Cookie", w.Header().Get("Vary"))
+}
+
 func TestRegisterNoRouteHandler_WithUI_HeadMethod(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -69,7 +93,7 @@ func TestRegisterNoRouteHandler_WithUI_HeadMethod(t *testing.T) {
 	}
 
 	router := gin.New()
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	req := httptest.NewRequest(http.MethodHead, "/some/page", nil)
 	req.Header.Set("Accept", "text/html")
@@ -90,7 +114,7 @@ func TestRegisterNoRouteHandler_WithUI_PostMethod(t *testing.T) {
 	}
 
 	router := gin.New()
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/some/api", nil)
 	req.Header.Set("Accept", "text/html")
@@ -107,7 +131,7 @@ func TestRegisterNoRouteHandler_NoUI_NonHTMLAccept(t *testing.T) {
 
 	router := gin.New()
 	assets := webUIAssets{} // no UI available
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil)
 	req.Header.Set("Accept", "application/json")
@@ -318,7 +342,7 @@ func TestRegisterNoRouteHandler_DebugLogging(t *testing.T) {
 
 	router := gin.New()
 	assets := webUIAssets{}
-	registerNoRouteHandler(router, assets)
+	registerNoRouteHandler(router, assets, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/movies", nil)
 	req.Header.Set("Accept", "application/json")

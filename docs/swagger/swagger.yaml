@@ -243,6 +243,8 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse:
     properties:
+      apply_plan:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan'
       completed:
         type: integer
       completed_at:
@@ -329,6 +331,8 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.BatchScrapeRequest:
     properties:
+      apply_plan:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan'
       array_strategy:
         description: 'For Update mode: merge, replace'
         example: merge
@@ -439,6 +443,13 @@ definitions:
       display_title:
         example: '[IPX-123] Beautiful Woman'
         type: string
+    type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.EffectiveApplyPlan:
+    properties:
+      merge_override:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MergeOverride'
+      plan:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan'
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse:
     properties:
@@ -965,6 +976,8 @@ definitions:
         description: Validated at the API layer (HTTP 400 for invalid)
         example: organize
         type: string
+      overrides:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides'
       skip_download:
         type: boolean
       skip_nfo:
@@ -972,6 +985,8 @@ definitions:
     type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.OrganizePreviewResponse:
     properties:
+      effective_apply:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.EffectiveApplyPlan'
       extrafanart_path:
         example: /path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart
         type: string
@@ -1046,6 +1061,8 @@ definitions:
         description: Validated at the API layer (HTTP 400 for invalid)
         example: organize
         type: string
+      overrides:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides'
       skip_download:
         type: boolean
       skip_nfo:
@@ -1290,6 +1307,29 @@ definitions:
         example: 10
         type: integer
     type: object
+  github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides:
+    properties:
+      array_strategy:
+        type: string
+      destination:
+        type: string
+      force_overwrite:
+        type: boolean
+      operation_mode:
+        type: string
+      overwrite_existing_media:
+        type: boolean
+      preserve_nfo:
+        type: boolean
+      preset:
+        type: string
+      scalar_strategy:
+        type: string
+      skip_download:
+        type: boolean
+      skip_nfo:
+        type: boolean
+    type: object
   github_com_javinizer_javinizer-go_internal_api_contracts.ScanRequest:
     properties:
       filter:
@@ -1442,6 +1482,12 @@ definitions:
         type: string
       force_overwrite:
         type: boolean
+      overrides:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides'
+      overwrite_existing_media:
+        default: false
+        example: false
+        type: boolean
       preserve_nfo:
         type: boolean
       preset:
@@ -1462,6 +1508,102 @@ definitions:
       skip_nfo:
         type: boolean
     type: object
+  github_com_javinizer_javinizer-go_internal_applyplan.ArrayStrategy:
+    enum:
+    - merge
+    - replace
+    type: string
+    x-enum-varnames:
+    - ArrayMerge
+    - ArrayReplace
+  github_com_javinizer_javinizer-go_internal_applyplan.MediaPolicy:
+    enum:
+    - missing
+    - replace
+    - skip
+    type: string
+    x-enum-varnames:
+    - MediaPolicyMissing
+    - MediaPolicyReplace
+    - MediaPolicySkip
+  github_com_javinizer_javinizer-go_internal_applyplan.MergeOverride:
+    enum:
+    - none
+    - force-overwrite
+    - preserve-nfo
+    type: string
+    x-enum-varnames:
+    - MergeOverrideNone
+    - MergeOverrideForceOverwrite
+    - MergeOverridePreserveNFO
+  github_com_javinizer_javinizer-go_internal_applyplan.MergePolicy:
+    properties:
+      array_strategy:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.ArrayStrategy'
+      scalar_strategy:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.ScalarStrategy'
+      source_preset:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Preset'
+    type: object
+  github_com_javinizer_javinizer-go_internal_applyplan.NFOOutput:
+    enum:
+    - write
+    - skip
+    type: string
+    x-enum-varnames:
+    - NFOOutputWrite
+    - NFOOutputSkip
+  github_com_javinizer_javinizer-go_internal_applyplan.Plan:
+    properties:
+      destination:
+        type: string
+      media_policy:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MediaPolicy'
+      merge:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MergePolicy'
+      nfo_output:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.NFOOutput'
+      version:
+        type: integer
+      video_operation:
+        $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.VideoOperation'
+    type: object
+  github_com_javinizer_javinizer-go_internal_applyplan.Preset:
+    enum:
+    - conservative
+    - gap-fill
+    - aggressive
+    type: string
+    x-enum-varnames:
+    - PresetConservative
+    - PresetGapFill
+    - PresetAggressive
+  github_com_javinizer_javinizer-go_internal_applyplan.ScalarStrategy:
+    enum:
+    - prefer-nfo
+    - prefer-scraper
+    - preserve-existing
+    - fill-missing-only
+    type: string
+    x-enum-varnames:
+    - ScalarPreferNFO
+    - ScalarPreferScraper
+    - ScalarPreserveExisting
+    - ScalarFillMissingOnly
+  github_com_javinizer_javinizer-go_internal_applyplan.VideoOperation:
+    enum:
+    - organize
+    - rename-in-place
+    - rename-file
+    - leave-in-place
+    - metadata-artwork
+    type: string
+    x-enum-varnames:
+    - VideoOperationOrganize
+    - VideoOperationRenameInPlace
+    - VideoOperationRenameFile
+    - VideoOperationLeaveInPlace
+    - VideoOperationMetadataArtwork
   github_com_javinizer_javinizer-go_internal_config.APIConfig:
     properties:
       security:
@@ -2651,6 +2793,13 @@ definitions:
       username:
         type: string
     type: object
+  github_com_javinizer_javinizer-go_internal_system.UpgradeCommand:
+    properties:
+      command:
+        type: string
+      key:
+        type: string
+    type: object
   github_com_javinizer_javinizer-go_internal_updater.State:
     enum:
     - idle
@@ -3109,6 +3258,17 @@ definitions:
       update_available:
         description: Whether an update is available
         type: boolean
+      upgrade_commands:
+        description: |-
+          UpgradeCommands breaks the guidance into discrete, paste-ready command
+          lines per install method (cli_binary / homebrew / scoop / docker_pull /
+          docker_compose) so the UI can render one copy button per command instead
+          of copying the prose blob. Homebrew is only listed on darwin/linux hosts
+          and Scoop on windows hosts (no OS offers both). Empty for desktop
+          (in-app upgrade only).
+        items:
+          $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_system.UpgradeCommand'
+        type: array
       upgrade_instructions:
         description: |-
           UpgradeInstructions carries environment-specific guidance verbatim (e.g.
@@ -3750,6 +3910,10 @@ paths:
           description: Not Found
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Persisted update plan must go through the update endpoint
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Organize batch job files
       tags:
       - web
@@ -4189,6 +4353,10 @@ paths:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
         "404":
           description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
+        "409":
+          description: Persisted organize plan must go through the organize endpoint
           schema:
             $ref: '#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse'
       summary: Update batch job files

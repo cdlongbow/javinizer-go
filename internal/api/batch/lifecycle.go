@@ -63,14 +63,27 @@ func batchScrape(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 
+		var update *bool
+		if req.Has("update") {
+			update = &req.Update
+		}
 		output, err := StartScrapeUseCase(c.Request.Context(), rt, StartScrapeInput{
-			Files:            req.Files,
-			Destination:      req.Destination,
-			OperationMode:    req.OperationMode,
-			Preset:           req.Preset,
-			ScalarStrategy:   req.ScalarStrategy,
-			ArrayStrategy:    req.ArrayStrategy,
-			Update:           &req.Update,
+			Files:          req.Files,
+			Destination:    req.Destination,
+			OperationMode:  req.OperationMode,
+			Preset:         req.Preset,
+			ScalarStrategy: req.ScalarStrategy,
+			ArrayStrategy:  req.ArrayStrategy,
+			Update:         update,
+			ApplyPlan:      req.ApplyPlan,
+			MirrorPresence: planMirrors{
+				destinationPresent: req.Has("destination"),
+				operationPresent:   req.Has("operation_mode"),
+				presetPresent:      req.Has("preset"),
+				scalarPresent:      req.Has("scalar_strategy"),
+				arrayPresent:       req.Has("array_strategy"),
+				updatePresent:      req.Has("update"),
+			},
 			SelectedScrapers: req.SelectedScrapers,
 			Strict:           req.Strict,
 			Force:            req.Force,

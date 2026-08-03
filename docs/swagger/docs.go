@@ -981,6 +981,12 @@ const docTemplate = `{
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
+                    },
+                    "409": {
+                        "description": "Persisted update plan must go through the update endpoint",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
                     }
                 }
             }
@@ -1618,6 +1624,12 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
+                        }
+                    },
+                    "409": {
+                        "description": "Persisted organize plan must go through the organize endpoint",
                         "schema": {
                             "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ErrorResponse"
                         }
@@ -4421,6 +4433,9 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.BatchJobResponse": {
             "type": "object",
             "properties": {
+                "apply_plan": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan"
+                },
                 "completed": {
                     "type": "integer"
                 },
@@ -4547,6 +4562,9 @@ const docTemplate = `{
                 "files"
             ],
             "properties": {
+                "apply_plan": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan"
+                },
                 "array_strategy": {
                     "description": "For Update mode: merge, replace",
                     "type": "string",
@@ -4688,6 +4706,17 @@ const docTemplate = `{
                 "display_title": {
                     "type": "string",
                     "example": "[IPX-123] Beautiful Woman"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.EffectiveApplyPlan": {
+            "type": "object",
+            "properties": {
+                "merge_override": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MergeOverride"
+                },
+                "plan": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Plan"
                 }
             }
         },
@@ -5442,6 +5471,9 @@ const docTemplate = `{
                     "type": "string",
                     "example": "organize"
                 },
+                "overrides": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides"
+                },
                 "skip_download": {
                     "type": "boolean"
                 },
@@ -5453,6 +5485,9 @@ const docTemplate = `{
         "github_com_javinizer_javinizer-go_internal_api_contracts.OrganizePreviewResponse": {
             "type": "object",
             "properties": {
+                "effective_apply": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.EffectiveApplyPlan"
+                },
                 "extrafanart_path": {
                     "type": "string",
                     "example": "/path/to/output/IPX-535 [IdeaPocket] - Beautiful Woman (2021)/extrafanart"
@@ -5553,6 +5588,9 @@ const docTemplate = `{
                     "description": "Validated at the API layer (HTTP 400 for invalid)",
                     "type": "string",
                     "example": "organize"
+                },
+                "overrides": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides"
                 },
                 "skip_download": {
                     "type": "boolean"
@@ -5899,6 +5937,41 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides": {
+            "type": "object",
+            "properties": {
+                "array_strategy": {
+                    "type": "string"
+                },
+                "destination": {
+                    "type": "string"
+                },
+                "force_overwrite": {
+                    "type": "boolean"
+                },
+                "operation_mode": {
+                    "type": "string"
+                },
+                "overwrite_existing_media": {
+                    "type": "boolean"
+                },
+                "preserve_nfo": {
+                    "type": "boolean"
+                },
+                "preset": {
+                    "type": "string"
+                },
+                "scalar_strategy": {
+                    "type": "string"
+                },
+                "skip_download": {
+                    "type": "boolean"
+                },
+                "skip_nfo": {
+                    "type": "boolean"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_api_contracts.ScanRequest": {
             "type": "object",
             "required": [
@@ -6119,6 +6192,14 @@ const docTemplate = `{
                 "force_overwrite": {
                     "type": "boolean"
                 },
+                "overrides": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_api_contracts.ReviewApplyOverrides"
+                },
+                "overwrite_existing_media": {
+                    "type": "boolean",
+                    "default": false,
+                    "example": false
+                },
                 "preserve_nfo": {
                     "type": "boolean"
                 },
@@ -6146,6 +6227,136 @@ const docTemplate = `{
                     "type": "boolean"
                 }
             }
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.ArrayStrategy": {
+            "type": "string",
+            "enum": [
+                "merge",
+                "replace"
+            ],
+            "x-enum-varnames": [
+                "ArrayMerge",
+                "ArrayReplace"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.MediaPolicy": {
+            "type": "string",
+            "enum": [
+                "missing",
+                "replace",
+                "skip"
+            ],
+            "x-enum-varnames": [
+                "MediaPolicyMissing",
+                "MediaPolicyReplace",
+                "MediaPolicySkip"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.MergeOverride": {
+            "type": "string",
+            "enum": [
+                "none",
+                "force-overwrite",
+                "preserve-nfo"
+            ],
+            "x-enum-varnames": [
+                "MergeOverrideNone",
+                "MergeOverrideForceOverwrite",
+                "MergeOverridePreserveNFO"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.MergePolicy": {
+            "type": "object",
+            "properties": {
+                "array_strategy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.ArrayStrategy"
+                },
+                "scalar_strategy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.ScalarStrategy"
+                },
+                "source_preset": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.Preset"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.NFOOutput": {
+            "type": "string",
+            "enum": [
+                "write",
+                "skip"
+            ],
+            "x-enum-varnames": [
+                "NFOOutputWrite",
+                "NFOOutputSkip"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.Plan": {
+            "type": "object",
+            "properties": {
+                "destination": {
+                    "type": "string"
+                },
+                "media_policy": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MediaPolicy"
+                },
+                "merge": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.MergePolicy"
+                },
+                "nfo_output": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.NFOOutput"
+                },
+                "version": {
+                    "type": "integer"
+                },
+                "video_operation": {
+                    "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_applyplan.VideoOperation"
+                }
+            }
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.Preset": {
+            "type": "string",
+            "enum": [
+                "conservative",
+                "gap-fill",
+                "aggressive"
+            ],
+            "x-enum-varnames": [
+                "PresetConservative",
+                "PresetGapFill",
+                "PresetAggressive"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.ScalarStrategy": {
+            "type": "string",
+            "enum": [
+                "prefer-nfo",
+                "prefer-scraper",
+                "preserve-existing",
+                "fill-missing-only"
+            ],
+            "x-enum-varnames": [
+                "ScalarPreferNFO",
+                "ScalarPreferScraper",
+                "ScalarPreserveExisting",
+                "ScalarFillMissingOnly"
+            ]
+        },
+        "github_com_javinizer_javinizer-go_internal_applyplan.VideoOperation": {
+            "type": "string",
+            "enum": [
+                "organize",
+                "rename-in-place",
+                "rename-file",
+                "leave-in-place",
+                "metadata-artwork"
+            ],
+            "x-enum-varnames": [
+                "VideoOperationOrganize",
+                "VideoOperationRenameInPlace",
+                "VideoOperationRenameFile",
+                "VideoOperationLeaveInPlace",
+                "VideoOperationMetadataArtwork"
+            ]
         },
         "github_com_javinizer_javinizer-go_internal_config.APIConfig": {
             "type": "object",
@@ -7840,6 +8051,17 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_javinizer_javinizer-go_internal_system.UpgradeCommand": {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string"
+                },
+                "key": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_javinizer_javinizer-go_internal_updater.State": {
             "type": "string",
             "enum": [
@@ -8517,6 +8739,13 @@ const docTemplate = `{
                 "update_available": {
                     "description": "Whether an update is available",
                     "type": "boolean"
+                },
+                "upgrade_commands": {
+                    "description": "UpgradeCommands breaks the guidance into discrete, paste-ready command\nlines per install method (cli_binary / homebrew / scoop / docker_pull /\ndocker_compose) so the UI can render one copy button per command instead\nof copying the prose blob. Homebrew is only listed on darwin/linux hosts\nand Scoop on windows hosts (no OS offers both). Empty for desktop\n(in-app upgrade only).",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_javinizer_javinizer-go_internal_system.UpgradeCommand"
+                    }
                 },
                 "upgrade_instructions": {
                     "description": "UpgradeInstructions carries environment-specific guidance verbatim (e.g.\nthe ` + "`" + `docker pull` + "`" + ` command for docker, the releases URL for desktop, the\n` + "`" + `javinizer upgrade` + "`" + ` command for cli) so the frontend doesn't have to\nhardcode the image ref or rebuild steps per environment.",

@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/imageutil"
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -12,7 +14,8 @@ import (
 	"github.com/javinizer/javinizer-go/internal/template"
 )
 
-func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
+func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (*DownloadResult, error) {
+	overwriteExisting, dedup := resolveDownloadOptions(options)
 	if !d.config.DownloadCover || movie.Poster.CoverURL == "" {
 		return &DownloadResult{Type: MediaTypeCover, Downloaded: false}, nil
 	}
@@ -20,18 +23,16 @@ func (d *Downloader) downloadCover(ctx context.Context, movie *models.Movie, des
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	destPath := d.pathResolver.ResolveFanartPath(movie, nil, true, tmplCtx, destDir)
 
-	return d.download(ctx, movie.Poster.CoverURL, destPath, MediaTypeCover)
+	return d.download(ctx, movie.Poster.CoverURL, destPath, MediaTypeCover, overwriteExisting, dedup)
 }
 
-// downloadPoster downloads the movie poster
-// If ShouldCropPoster is true, the poster is created by cropping the right 47.2% of the cover image
-// If ShouldCropPoster is false, the poster is downloaded directly without cropping (high-quality poster)
-func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
+func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (finalResult *DownloadResult, finalErr error) {
+	startTime := time.Now()
+	overwriteExisting, dedup := resolveDownloadOptions(options)
 	if !d.config.DownloadPoster {
 		return &DownloadResult{Type: MediaTypePoster, Downloaded: false}, nil
 	}
 
-	// Use PosterURL if available, otherwise fall back to CoverURL
 	posterURL := movie.Poster.PosterURL
 	if posterURL == "" {
 		posterURL = movie.Poster.CoverURL
@@ -46,79 +47,117 @@ func (d *Downloader) downloadPoster(ctx context.Context, movie *models.Movie, de
 	bounds := movie.Poster.PosterCropBounds
 	geometryUsable := bounds != nil && movie.Poster.PosterCropSourceFull && bounds.Valid()
 
-	// Check if poster already exists. Existing artwork is never replaced,
-	// even with pending manual crop geometry: downloaded paths feed the
-	// revert delete-list, so overwriting would leave NO poster after a
-	// revert. In-place artwork refresh needs overwrite tracking first
-	// (tracked in the follow-up issue).
-	if info, err := d.fs.Stat(destPath); err == nil {
-		// Already exists
-		return &DownloadResult{
-			Type:       MediaTypePoster,
-			LocalPath:  destPath,
-			Size:       info.Size(),
-			Downloaded: false,
-		}, nil
-	}
 	if !geometryUsable && !movie.Poster.ShouldCropPoster {
-		// High-quality poster - download directly without cropping
-		result, err := d.download(ctx, posterURL, destPath, MediaTypePoster)
-		return result, err
+		return d.download(ctx, posterURL, destPath, MediaTypePoster, overwriteExisting, dedup)
 	}
 
-	// One GET feeds every poster-producing path below — fallback paths reuse
-	// the already-downloaded bytes instead of re-requesting the URL, so a
-	// single-use/signed poster URL cannot be consumed twice.
-	tempPath := destPath + ".full.tmp"
-	result, err := d.download(ctx, posterURL, tempPath, MediaTypePoster)
-	if err != nil || !result.Downloaded {
-		_ = d.fs.Remove(tempPath) // Clean up if exists
-		return result, err
+	result := &DownloadResult{
+		URL:  posterURL,
+		Type: MediaTypePoster,
 	}
-
-	// Manual geometry first: reproduce the review-page crop on the downloaded
-	// source. Any inconsistency (undecodable, aspect drift, empty rect) falls
-	// through to the pre-geometry behavior with the temp file kept in place.
-	if geometryUsable && d.cropDownloadedPoster(tempPath, destPath, bounds) {
-		_ = d.fs.Remove(tempPath)
-		d.finalizePosterResult(result, destPath)
-		return result, nil
-	}
-
-	if !movie.Poster.ShouldCropPoster {
-		// Preserve the pre-geometry direct-download success: promote the
-		// already-downloaded bytes rather than re-requesting the URL.
-		if rerr := d.fs.Rename(tempPath, destPath); rerr != nil {
-			logging.Warnf("downloadPoster: failed to promote %s: %v", tempPath, rerr)
-			_ = d.fs.Remove(tempPath)
-			result.Downloaded = false
-			result.LocalPath = "" // never report the removed temp path
-			result.Size = 0
-			result.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
+	var reservation *downloadReservation
+	if overwriteExisting {
+		var skipped bool
+		var reservationErr error
+		reservation, skipped, reservationErr = acquireDownloadReservation(ctx, dedup, destPath)
+		if reservationErr != nil {
+			result.Error = reservationErr
+			result.Duration = time.Since(startTime)
 			return result, result.Error
 		}
-		d.finalizePosterResult(result, destPath)
+		if skipped {
+			result.Skipped = true
+			result.Duration = time.Since(startTime)
+			return result, nil
+		}
+		defer func() {
+			finishDownloadReservation(dedup, destPath, reservation, finalErr == nil)
+		}()
+	}
+
+	existed := false
+	if overwriteExisting {
+		_, err := d.fs.Stat(destPath)
+		switch {
+		case err == nil:
+			existed = true
+		case os.IsNotExist(err):
+		default:
+			result.Error = fmt.Errorf("failed to stat destination: %w", err)
+			result.Duration = time.Since(startTime)
+			return result, result.Error
+		}
+	} else if info, err := d.fs.Stat(destPath); err == nil {
+		// Existing artwork is never replaced outside overwrite mode, even with
+		// pending manual crop geometry: downloaded paths feed the revert
+		// delete-list, so replacing here would leave NO poster after a revert.
+		result.LocalPath = destPath
+		result.Size = info.Size()
+		result.Duration = time.Since(startTime)
 		return result, nil
 	}
 
-	// Low-quality poster - crop from the downloaded cover
-	if err := imageutil.CropPosterFromCover(d.fs, tempPath, destPath, d.config.MaxPosterHeight); err != nil {
-		_ = d.fs.Remove(tempPath) // Clean up temp file
-		result.Error = fmt.Errorf("failed to crop poster: %w", err)
-		result.Downloaded = false
-		return result, result.Error
+	// One GET feeds every poster-producing path below — manual crop, promote,
+	// and auto crop all reuse the already-downloaded bytes, so a single-use or
+	// signed poster URL cannot be consumed twice.
+	fullPath := uniqueTempPath(destPath, "full.tmp")
+	defer func() { _ = d.fs.Remove(fullPath) }()
+
+	fullResult, err := d.download(ctx, posterURL, fullPath, MediaTypePoster, overwriteExisting, nil)
+	fullResult.LocalPath = ""
+	if err != nil || !fullResult.Downloaded {
+		fullResult.Downloaded = false
+		fullResult.Replaced = false
+		fullResult.Duration = time.Since(startTime)
+		return fullResult, err
 	}
 
-	// Clean up the temporary full image
-	_ = d.fs.Remove(tempPath)
+	cropPath := uniqueTempPath(destPath, "crop.tmp")
+	defer func() { _ = d.fs.Remove(cropPath) }()
 
-	// Update result with final path and size
-	if info, err := d.fs.Stat(destPath); err == nil {
-		result.LocalPath = destPath
-		result.Size = info.Size()
+	candidate := fullPath
+	cropped := false
+	if geometryUsable && d.cropDownloadedPoster(fullPath, cropPath, bounds) {
+		candidate = cropPath
+		cropped = true
+	}
+	if !cropped && movie.Poster.ShouldCropPoster {
+		if err := imageutil.CropPosterFromCover(d.fs, fullPath, cropPath, d.config.MaxPosterHeight); err != nil {
+			fullResult.Error = fmt.Errorf("failed to crop poster: %w", err)
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.LocalPath = ""
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, fullResult.Error
+		}
+		candidate = cropPath
 	}
 
-	return result, nil
+	if overwriteExisting {
+		if err := replaceFile(d.fs, candidate, destPath); err != nil {
+			fullResult.Error = fmt.Errorf("failed to replace poster: %w", err)
+			fullResult.Downloaded = false
+			fullResult.Replaced = false
+			fullResult.LocalPath = ""
+			fullResult.Duration = time.Since(startTime)
+			return fullResult, fullResult.Error
+		}
+	} else if rerr := d.fs.Rename(candidate, destPath); rerr != nil {
+		logging.Warnf("downloadPoster: failed to promote %s: %v", candidate, rerr)
+		fullResult.Downloaded = false
+		fullResult.Replaced = false
+		fullResult.LocalPath = ""
+		fullResult.Size = 0
+		fullResult.Error = fmt.Errorf("failed to finalize poster: %w", rerr)
+		fullResult.Duration = time.Since(startTime)
+		return fullResult, fullResult.Error
+	}
+
+	fullResult.Downloaded = true
+	fullResult.Replaced = existed
+	d.finalizePosterResult(fullResult, destPath)
+	fullResult.Duration = time.Since(startTime)
+	return fullResult, nil
 }
 
 // finalizePosterResult points result at the promoted poster, or clears the
@@ -133,11 +172,11 @@ func (d *Downloader) finalizePosterResult(result *DownloadResult, destPath strin
 }
 
 // cropDownloadedPoster applies the normalized review-page geometry to an
-// already-downloaded full source image and writes the final poster.
+// already-downloaded full source image and writes the cropped poster to dst.
 // Returns false when the geometry does not apply to this image (undecodable,
 // aspect drift, empty rect); the caller then falls back to the pre-geometry
 // behavior with the temp file still in place.
-func (d *Downloader) cropDownloadedPoster(tempPath, destPath string, bounds *models.CropBounds) bool {
+func (d *Downloader) cropDownloadedPoster(tempPath, dst string, bounds *models.CropBounds) bool {
 	w, h, derr := imageutil.ImageDimensions(d.fs, tempPath)
 	if derr != nil || w <= 0 || h <= 0 {
 		logging.Warnf("downloadPoster: cannot decode downloaded source for manual crop: %v", derr)
@@ -169,7 +208,7 @@ func (d *Downloader) cropDownloadedPoster(tempPath, destPath string, bounds *mod
 		return false
 	}
 
-	if err := imageutil.CropPosterWithBounds(d.fs, tempPath, destPath, left, top, right, bottom, d.config.MaxPosterHeight); err != nil {
+	if err := imageutil.CropPosterWithBounds(d.fs, tempPath, dst, left, top, right, bottom, d.config.MaxPosterHeight); err != nil {
 		logging.Warnf("downloadPoster: manual crop failed: %v", err)
 		return false
 	}
@@ -179,17 +218,15 @@ func (d *Downloader) cropDownloadedPoster(tempPath, destPath string, bounds *mod
 // downloadExtrafanart downloads screenshots to the extrafanart subdirectory.
 // Extrafanart is used by media centers like Kodi/Plex for background images.
 // Note: In the original Javinizer, screenshots and extrafanart are the same thing.
-func (d *Downloader) downloadExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, enabled bool) ([]DownloadResult, error) {
+func (d *Downloader) downloadExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, enabled bool, options ...any) ([]DownloadResult, error) {
+	overwriteExisting, dedup := resolveDownloadOptions(options)
 	if !enabled || len(movie.Screenshots) == 0 {
 		return []DownloadResult{}, nil
 	}
 
-	// Create extrafanart subdirectory using configurable folder name
 	extrafanartDir := filepath.Join(destDir, d.config.ScreenshotFolder)
-
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	screenshotNames := d.pathResolver.ResolveScreenshotNames(movie, true, tmplCtx)
-
 	results := make([]DownloadResult, 0, len(movie.Screenshots))
 
 	for i, url := range movie.Screenshots {
@@ -203,14 +240,9 @@ func (d *Downloader) downloadExtrafanart(ctx context.Context, movie *models.Movi
 			break
 		}
 		destPath := filepath.Join(extrafanartDir, screenshotNames[i])
-
-		result, err := d.download(ctx, url, destPath, MediaTypeExtrafanart)
+		result, err := d.download(ctx, url, destPath, MediaTypeExtrafanart, overwriteExisting, dedup)
 		if err != nil {
-			result = &DownloadResult{
-				URL:   url,
-				Type:  MediaTypeExtrafanart,
-				Error: err,
-			}
+			result.Error = err
 		}
 		results = append(results, *result)
 	}
@@ -218,8 +250,8 @@ func (d *Downloader) downloadExtrafanart(ctx context.Context, movie *models.Movi
 	return results, nil
 }
 
-// downloadTrailer downloads the movie trailer
-func (d *Downloader) downloadTrailer(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo) (*DownloadResult, error) {
+func (d *Downloader) downloadTrailer(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, options ...any) (*DownloadResult, error) {
+	overwriteExisting, dedup := resolveDownloadOptions(options)
 	if !d.config.DownloadTrailer || movie.TrailerURL == "" {
 		return &DownloadResult{Type: MediaTypeTrailer, Downloaded: false}, nil
 	}
@@ -227,21 +259,16 @@ func (d *Downloader) downloadTrailer(ctx context.Context, movie *models.Movie, d
 	tmplCtx := d.buildTemplateContext(movie, multipart)
 	destPath := d.pathResolver.ResolveTrailerPath(movie, true, tmplCtx, destDir)
 
-	return d.download(ctx, movie.TrailerURL, destPath, MediaTypeTrailer)
+	return d.download(ctx, movie.TrailerURL, destPath, MediaTypeTrailer, overwriteExisting, dedup)
 }
 
-// downloadActressImages downloads actress thumbnail images.
-// Per-item download errors are captured in DownloadResult.Error fields rather than
-// returned as a top-level error. The caller should inspect individual results
-// for failures. A top-level error is only returned for context cancellation.
-func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Movie, destDir string) ([]DownloadResult, error) {
+func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Movie, destDir string, options ...any) ([]DownloadResult, error) {
+	overwriteExisting, dedup := resolveDownloadOptions(options)
 	if !d.config.DownloadActress || len(movie.Actresses) == 0 {
 		return []DownloadResult{}, nil
 	}
 
-	// Create actress subdirectory using configurable folder name
 	actressDir := filepath.Join(destDir, d.config.ActressFolder)
-
 	results := make([]DownloadResult, 0)
 
 	for _, actress := range movie.Actresses {
@@ -255,7 +282,6 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 			continue
 		}
 
-		// Format actress name according to NFO settings (Japanese vs English)
 		formattedName := models.FormatActressName(actress, models.FormatActressNameOptions{
 			JapaneseNames:      d.config.ActorJapaneseNames,
 			FirstNameOrder:     d.config.ActorFirstNameOrder,
@@ -266,27 +292,17 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 			continue
 		}
 
-		// Use configurable template for actress filenames
-		// Create a temporary movie with actress data for template processing
-		actressMovie := &models.Movie{
-			ID: movie.ID,
-		}
-
+		actressMovie := &models.Movie{ID: movie.ID}
 		filename := d.generateActressFilename(actressMovie, formattedName, d.config.ActressFormat)
 		if filename == "" {
-			// Fallback to default format
 			name := template.SanitizeFilename(formattedName)
 			filename = fmt.Sprintf("%s.jpg", name)
 		}
 		destPath := filepath.Join(actressDir, filename)
 
-		result, err := d.download(ctx, actress.ThumbURL, destPath, MediaTypeActress)
+		result, err := d.download(ctx, actress.ThumbURL, destPath, MediaTypeActress, overwriteExisting, dedup)
 		if err != nil {
-			result = &DownloadResult{
-				URL:   actress.ThumbURL,
-				Type:  MediaTypeActress,
-				Error: err,
-			}
+			result.Error = err
 		}
 		results = append(results, *result)
 	}
@@ -294,67 +310,47 @@ func (d *Downloader) downloadActressImages(ctx context.Context, movie *models.Mo
 	return results, nil
 }
 
-// downloadAllWithExtrafanart is like downloadAll but accepts an explicit extrafanart flag.
-// This avoids mutating the shared Config struct when the TUI needs to toggle extrafanart at runtime.
-func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, extrafanartEnabled bool) ([]DownloadResult, error) {
+func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *models.Movie, destDir string, multipart *MultipartInfo, extrafanartEnabled bool, options ...any) ([]DownloadResult, error) {
+	overwriteExisting, dedup := resolveDownloadOptions(options)
 	results := make([]DownloadResult, 0)
-
-	// Track critical media (cover + poster) to detect partial-download-failure.
-	// If both cover and poster are attempted but neither succeeds, return a
-	// DownloadPartialError sentinel; the apply orchestrator treats it as
-	// non-fatal (logs the failure, preserves non-critical artifacts for revert
-	// cleanup, and proceeds to NFO generation per the project's NFO guarantee).
 	criticalAttempted := 0
 	criticalSucceeded := 0
 
-	// Download cover (fanart)
-	// Note: Each download method has a file-exists check, so if templates produce
-	// the same filename for different parts, the file won't be re-downloaded.
-	// If templates use <IF:MULTIPART> or <PART>, each part gets its own file.
-	coverResult, _ := d.downloadCover(ctx, movie, destDir, multipart)
+	coverResult, _ := d.downloadCover(ctx, movie, destDir, multipart, overwriteExisting, dedup)
 	if coverResult != nil {
 		if coverResult.Error != nil {
 			logging.Warnf("downloadAll: cover download failed for %s: %v", movie.ID, coverResult.Error)
 		}
-		if coverResult.Type == MediaTypeCover {
-			// Only count as attempted if cover downloading is enabled and URL was present
-			if d.config.DownloadCover && movie.Poster.CoverURL != "" {
-				criticalAttempted++
-				// File exists on disk = success (whether newly downloaded or already present)
-				if coverResult.Error == nil && coverResult.LocalPath != "" {
-					criticalSucceeded++
-				}
+		if coverResult.Type == MediaTypeCover && d.config.DownloadCover && movie.Poster.CoverURL != "" && !coverResult.Skipped {
+			criticalAttempted++
+			if coverResult.Error == nil && coverResult.LocalPath != "" {
+				criticalSucceeded++
 			}
 		}
 		results = append(results, *coverResult)
 	}
 
-	// Download poster
-	posterResult, _ := d.downloadPoster(ctx, movie, destDir, multipart)
+	posterResult, _ := d.downloadPoster(ctx, movie, destDir, multipart, overwriteExisting, dedup)
 	if posterResult != nil {
 		if posterResult.Error != nil {
 			logging.Warnf("downloadAll: poster download failed for %s: %v", movie.ID, posterResult.Error)
 		}
-		if posterResult.Type == MediaTypePoster {
-			if d.config.DownloadPoster {
-				posterURL := movie.Poster.PosterURL
-				if posterURL == "" {
-					posterURL = movie.Poster.CoverURL
-				}
-				if posterURL != "" {
-					criticalAttempted++
-					// File exists on disk = success (whether newly downloaded or already present)
-					if posterResult.Error == nil && posterResult.LocalPath != "" {
-						criticalSucceeded++
-					}
+		if posterResult.Type == MediaTypePoster && d.config.DownloadPoster && !posterResult.Skipped {
+			posterURL := movie.Poster.PosterURL
+			if posterURL == "" {
+				posterURL = movie.Poster.CoverURL
+			}
+			if posterURL != "" {
+				criticalAttempted++
+				if posterResult.Error == nil && posterResult.LocalPath != "" {
+					criticalSucceeded++
 				}
 			}
 		}
 		results = append(results, *posterResult)
 	}
 
-	// Download extrafanart (screenshots)
-	extrafanart, _ := d.downloadExtrafanart(ctx, movie, destDir, multipart, extrafanartEnabled)
+	extrafanart, _ := d.downloadExtrafanart(ctx, movie, destDir, multipart, extrafanartEnabled, overwriteExisting, dedup)
 	for i := range extrafanart {
 		if extrafanart[i].Error != nil {
 			logging.Warnf("downloadAll: extrafanart[%d] download failed for %s: %v", i, movie.ID, extrafanart[i].Error)
@@ -362,22 +358,19 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 	}
 	results = append(results, extrafanart...)
 
-	// Download trailer
-	if trailerResult, _ := d.downloadTrailer(ctx, movie, destDir, multipart); trailerResult != nil {
+	if trailerResult, _ := d.downloadTrailer(ctx, movie, destDir, multipart, overwriteExisting, dedup); trailerResult != nil {
 		if trailerResult.Error != nil {
 			logging.Warnf("downloadAll: trailer download failed for %s: %v", movie.ID, trailerResult.Error)
 		}
 		results = append(results, *trailerResult)
 	}
 
-	// Download actress images (doesn't use multipart - shared across all parts)
-	// Only download for single files or first part to avoid duplicate downloads
 	partNumber := 0
 	if multipart != nil {
 		partNumber = multipart.PartNumber
 	}
-	if partNumber == 0 || partNumber == 1 {
-		actresses, err := d.downloadActressImages(ctx, movie, destDir)
+	if partNumber == 0 || partNumber == 1 || overwriteExisting {
+		actresses, err := d.downloadActressImages(ctx, movie, destDir, overwriteExisting, dedup)
 		if err != nil {
 			logging.Warnf("downloadAll: actress image download aborted for %s: %v", movie.ID, err)
 		}
@@ -389,16 +382,8 @@ func (d *Downloader) downloadAllWithExtrafanart(ctx context.Context, movie *mode
 		results = append(results, actresses...)
 	}
 
-	// Return partial-error sentinel when all critical media (cover+poster) failed.
-	// The apply orchestrator treats this as non-fatal: it logs the failure,
-	// preserves any non-critical artifacts that did download (for revert
-	// cleanup), and proceeds to NFO generation — the project guarantee is that
-	// a correct NFO is produced regardless of artwork availability.
 	if criticalAttempted > 0 && criticalSucceeded == 0 {
-		return results, &DownloadPartialError{
-			Attempted: criticalAttempted,
-			Succeeded: criticalSucceeded,
-		}
+		return results, &DownloadPartialError{Attempted: criticalAttempted, Succeeded: criticalSucceeded}
 	}
 
 	return results, nil

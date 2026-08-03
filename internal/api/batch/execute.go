@@ -2,6 +2,7 @@ package batch
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/javinizer/javinizer-go/internal/api/contracts"
 	"github.com/javinizer/javinizer-go/internal/api/core"
+	"github.com/javinizer/javinizer-go/internal/applyplan"
 	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/operationmode"
@@ -68,6 +70,7 @@ func prepareAndLaunchApply(
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
+// @Failure 409 {object} contracts.ErrorResponse "Persisted update plan must go through the update endpoint"
 // @Router /api/v1/batch/{id}/organize [post]
 func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -94,8 +97,12 @@ func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		applyOpts, resolveErr := resolveOrganizeApplyConfig(snap, factory, job, req)
 		if resolveErr != nil {
-			if resolveErr.Error() == "Access denied to requested directory" {
-				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: resolveErr.Error()})
+			if errors.Is(resolveErr, ErrApplyEndpointConflict) {
+				c.JSON(http.StatusConflict, contracts.ErrorResponse{Error: resolveErr.Error()})
+			} else if resolveErr.Error() == "access denied to requested directory" {
+				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "Access denied to requested directory"})
+			} else if resolveErr.Error() == "preview mode should use the preview endpoint, not organize" {
+				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "Preview mode should use the preview endpoint, not organize"})
 			} else {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: resolveErr.Error()})
 			}
@@ -117,6 +124,7 @@ func organizeJob(rt *core.APIRuntime) gin.HandlerFunc {
 // @Success 200 {object} map[string]string
 // @Failure 400 {object} contracts.ErrorResponse
 // @Failure 404 {object} contracts.ErrorResponse
+// @Failure 409 {object} contracts.ErrorResponse "Persisted organize plan must go through the organize endpoint"
 // @Router /api/v1/batch/{id}/update [post]
 func updateBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -170,7 +178,11 @@ func updateBatchJob(rt *core.APIRuntime) gin.HandlerFunc {
 		}
 		applyOpts, err := resolveUpdateApplyConfig(snap, factory, job, req)
 		if err != nil {
-			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+			statusCode := http.StatusBadRequest
+			if errors.Is(err, ErrApplyEndpointConflict) {
+				statusCode = http.StatusConflict
+			}
+			c.JSON(statusCode, contracts.ErrorResponse{Error: err.Error()})
 			return
 		}
 
@@ -209,10 +221,40 @@ func previewOrganize(rt *core.APIRuntime) gin.HandlerFunc {
 		batchCfg := apiCfg.BatchConfig()
 		secCfg := apiCfg.SecurityConfig()
 
+		operationInput := req.OperationMode
+		destination := req.Destination
+		skipNFO := req.SkipNFO
+		skipDownload := req.SkipDownload
+		forceNFO := false
+		forceRenameFile := false
+		var effectiveApply *applyplan.EffectivePlan
+		if previewJob, ok := rt.Deps().GetJobStore().GetBatchJob(jobID); ok {
+			status := previewJob.GetStatus()
+			if status != nil && status.ApplyPlan != nil {
+				var err error
+				overrides, mergeErr := reviewOverridesForPreview(req)
+				if mergeErr != nil {
+					c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: mergeErr.Error()})
+					return
+				}
+				effectiveApply, err = effectiveFromOverrides(status.ApplyPlan, overrides)
+				if err != nil {
+					c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: err.Error()})
+					return
+				}
+				projection, _ := applyplan.Project(effectiveApply.Plan)
+				operationInput = string(projection.OperationMode)
+				destination = projection.Destination
+				skipNFO = projection.SkipNFO
+				skipDownload = projection.SkipDownload
+				forceNFO = !projection.SkipNFO
+				forceRenameFile = projection.ForceRenameFile
+			}
+		}
 		resolvedPreview, resolveErr := workflow.ResolveSeamStrings(workflow.SeamStringsInput{
 			OperationMode: func() string {
-				if req.OperationMode != "" {
-					return req.OperationMode
+				if operationInput != "" {
+					return operationInput
 				}
 				return batchCfg.OperationMode
 			}(),
@@ -221,22 +263,19 @@ func previewOrganize(rt *core.APIRuntime) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: resolveErr.Error()})
 			return
 		}
-
 		effectiveMode := resolvedPreview.OperationMode
-
 		if effectiveMode == operationmode.OperationModeOrganize || effectiveMode == operationmode.OperationModePreview {
 			deps := rt.Deps()
-			if req.Destination == "" {
+			if destination == "" {
 				c.JSON(http.StatusBadRequest, contracts.ErrorResponse{Error: "destination is required for organize and preview modes"})
 				return
 			}
-			if !isDirAllowed(deps.GetFs(), req.Destination, secCfg) {
+			if !isDirAllowed(deps.GetFs(), destination, secCfg) {
 				c.JSON(http.StatusForbidden, contracts.ErrorResponse{Error: "Access denied to requested directory"})
 				return
 			}
 		}
 
-		// Resolve preview data: lookup job, find movie, collect file match infos
 		movieData, fileMatchInfos, previewResolveErr := ResolvePreviewData(rt.Deps(), jobID, resultID, req)
 		if previewResolveErr != nil {
 			previewResolveErr.Write(c)
@@ -250,18 +289,21 @@ func previewOrganize(rt *core.APIRuntime) gin.HandlerFunc {
 			return
 		}
 		previewResult, previewErr := wf.Preview(c.Request.Context(), workflow.PreviewCmd{
-			Movie:         movieData,
-			FileResults:   fileMatchInfos,
-			Destination:   req.Destination,
-			OperationMode: resolvedPreview.OperationMode,
-			SkipNFO:       req.SkipNFO,
-			SkipDownload:  req.SkipDownload,
+			Movie:           movieData,
+			FileResults:     fileMatchInfos,
+			Destination:     destination,
+			OperationMode:   resolvedPreview.OperationMode,
+			SkipNFO:         skipNFO,
+			SkipDownload:    skipDownload,
+			ForceNFO:        forceNFO,
+			ForceRenameFile: forceRenameFile,
 		})
 		if previewErr != nil {
 			c.JSON(http.StatusInternalServerError, contracts.ErrorResponse{Error: fmt.Sprintf("Preview failed: %v", previewErr)})
 			return
 		}
 		preview := previewResultToResponse(previewResult)
+		preview.EffectiveApply = effectiveApply
 		c.JSON(http.StatusOK, preview)
 	}
 }
