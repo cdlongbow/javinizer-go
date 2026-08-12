@@ -21,6 +21,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/javinizer/javinizer-go/internal/api/testkit"
+
+	workermocks "github.com/javinizer/javinizer-go/internal/mocks/worker"
 )
 
 func TestListBatchJobs_PersistedWithOpCounts(t *testing.T) {
@@ -184,10 +186,20 @@ func TestProcessBulkRescrapeMovie_Error(t *testing.T) {
 	job := &stubControlledJob{rescrapeErr: fmt.Errorf("scrape error")}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Contains(t, result.Error, "Rescrape failed")
+}
+
+// The bulk per-movie merge-error arm: a bad preset rejects with a failed
+// DTO and NO recovery handle.
+func TestProcessBulkRescrapeMovie_BadMergePreset(t *testing.T) {
+	mockJob := workermocks.NewMockBatchJobInterface(t)
+	out, rec := processBulkRescrapeMovie(context.Background(), "MV-BM", mockJob, &contracts.BatchRescrapeRequest{Preset: "bogus"}, minimalFactory{})
+	require.Equal(t, models.RescrapeStatusFailed, out.Status)
+	assert.Contains(t, out.Error, "invalid merge options")
+	assert.Nil(t, rec)
 }
 
 func TestProcessBulkRescrapeMovie_GoneStatus(t *testing.T) {
@@ -195,7 +207,7 @@ func TestProcessBulkRescrapeMovie_GoneStatus(t *testing.T) {
 	job := &stubControlledJob{rescrapeResult: &worker.RescrapeResult{Status: models.RescrapeStatusGone}}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Contains(t, result.Error, "deleted during rescrape")
@@ -206,7 +218,7 @@ func TestProcessBulkRescrapeMovie_ConflictStatus(t *testing.T) {
 	job := &stubControlledJob{rescrapeResult: &worker.RescrapeResult{Status: models.RescrapeStatusConflict}}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Contains(t, result.Error, "Concurrent rescrape conflict")
@@ -217,7 +229,7 @@ func TestProcessBulkRescrapeMovie_FailedStatus(t *testing.T) {
 	job := &stubControlledJob{rescrapeResult: &worker.RescrapeResult{Status: models.RescrapeStatusFailed, Error: "no scraper results"}}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusFailed, result.Status)
 	assert.Equal(t, "no scraper results", result.Error)
@@ -229,7 +241,7 @@ func TestProcessBulkRescrapeMovie_SuccessStatus(t *testing.T) {
 	job := &stubControlledJob{rescrapeResult: &worker.RescrapeResult{Status: models.RescrapeStatusSuccess, Movie: movie}}
 	factory := worker.NewBatchJobFactory(nil, nil, nil, nil, worker.BatchJobConfig{}, nil)
 
-	result := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
+	result, _ := processBulkRescrapeMovie(ctx, "ABC-123", job, &contracts.BatchRescrapeRequest{}, factory)
 
 	assert.Equal(t, models.RescrapeStatusSuccess, result.Status)
 	assert.Equal(t, "ABC-123", result.Movie.ID)
@@ -247,7 +259,18 @@ func (s *stubControlledJob) GetJobStatus() models.JobStatus                     
 func (s *stubControlledJob) GetStatus() *worker.BatchJobStatus                       { return s.status }
 func (s *stubControlledJob) GetMovieResult(string) (*resultstore.MovieResult, error) { return nil, nil }
 func (s *stubControlledJob) Subscribe() worker.JobEventSubscriber                    { return nil }
-func (s *stubControlledJob) FindFilePathsForMovieID(string) []string                 { return nil }
+func (s *stubControlledJob) GetCurrentPhase() string                                 { return "" }
+func (s *stubControlledJob) UpdateMovieFamily(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) error {
+	return nil
+}
+func (s *stubControlledJob) UpdateMovieFamilyWithEcho(context.Context, string, string, *models.Movie, worker.FamilySaveOptions) (*uint64, map[string]uint64, error) {
+	return nil, nil, nil
+}
+func (s *stubControlledJob) ExcludeMovieFamily(context.Context, string) error { return nil }
+func (s *stubControlledJob) WithMovieEditLock(_ string, fn func(*worker.LockedMovieOps) error) error {
+	return fn(&worker.LockedMovieOps{})
+}
+func (s *stubControlledJob) FindFilePathsForMovieID(string) []string { return nil }
 func (s *stubControlledJob) FindMovieResultForMovieID(string) (*resultstore.MovieResult, error) {
 	return nil, nil
 }

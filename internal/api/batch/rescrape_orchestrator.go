@@ -47,9 +47,11 @@ func NewRescrapeOrchestrator(deps RescrapeDeps) *RescrapeOrchestrator {
 	}
 }
 
-// JobPersistencer persists a job by ID after rescrape.
+// JobPersistencer persists a job by ID after rescrape. The error is
+// surfaced (not dropped) so rescrape handlers can log a durability failure
+// instead of silently leaving an un-persisted envelope (D2).
 type JobPersistencer interface {
-	PersistJobByID(id string)
+	PersistJobByID(id string) error
 }
 
 // ProgressBroadcaster broadcasts rescrape progress via WebSocket.
@@ -114,7 +116,16 @@ func (o *RescrapeOrchestrator) Rescrape(ctx context.Context, jobID, movieID, fil
 		return nil, err
 	}
 
-	o.persist.PersistJobByID(jobID)
+	if err := o.persist.PersistJobByID(jobID); err != nil {
+		// codex cloud P1: a 200 with an unpersisted rescrape is data loss —
+		// post-restart the stale envelope revives and the recovery state helps
+		// restore the older poster. Propagate; recovery stays on disk either way.
+		return nil, fmt.Errorf("rescrape envelope persist failed: %w", err)
+	} else if result != nil && result.PosterRecovery != nil {
+		// codex cloud P1: parked-poster teardown belongs AFTER the durable
+		// envelope write, never before it.
+		result.PosterRecovery.Finalize()
+	}
 
 	return &SingleRescrapeResult{
 		RescrapeResult: result,
@@ -176,9 +187,19 @@ func (o *RescrapeOrchestrator) BulkRescrape(ctx context.Context, jobID string, m
 		}
 	}
 
-	results := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
+	results, recoveryHandles := bulkRescrapePool(workCtx, job, movieIDs, req, o.factory, progressFn)
 
-	o.persist.PersistJobByID(jobID)
+	if err := o.persist.PersistJobByID(jobID); err != nil {
+		// codex cloud P1: same propagation for bulk — false-success hides an
+		// envelope the next restart would revive over the rescraped batch.
+		return nil, fmt.Errorf("bulk rescrape envelope persist failed: %w", err)
+	} else {
+		// codex cloud P1: recovery teardown belongs after the durable envelope —
+		// per-movie handles ride the pool, finalize happens only here.
+		for _, h := range recoveryHandles {
+			h.Finalize()
+		}
+	}
 
 	succeeded := 0
 	failed := 0

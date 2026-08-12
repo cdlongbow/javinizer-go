@@ -19,6 +19,7 @@ import (
 
 	httpclientiface "github.com/javinizer/javinizer-go/internal/httpclient"
 	"github.com/javinizer/javinizer-go/internal/imageutil"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/ssrf"
 	"github.com/spf13/afero"
 )
@@ -234,11 +235,60 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 		return nil, fmt.Errorf("image too large (max 50 MB)")
 	}
 
+	// audit F-R3-2b: park PRE-EXISTING canonical legs before overwriting — a
+	// failed download must restore the committed state's bytes, not destroy
+	// them (a 200-but-undecodable body previously deleted a healthy pair).
+	fullParked := tempFullPath + ".dlbak"
+	hadFull := false
+	if _, stErr := pm.fs.Stat(tempFullPath); stErr == nil {
+		if rnErr := pm.fs.Rename(tempFullPath, fullParked); rnErr != nil {
+			_ = pm.fs.Remove(tempDownloadPath)
+			return nil, fmt.Errorf("failed to park previous full poster: %w", rnErr)
+		}
+		hadFull = true
+	} else if !os.IsNotExist(stErr) {
+		// local codex review P1: an UNDECIDABLE stat is not absence — refuse the
+		// download before byte damage rather than replace a leg nothing parked.
+		_ = pm.fs.Remove(tempDownloadPath)
+		return nil, fmt.Errorf("failed to inspect previous full poster: %w", stErr)
+	}
 	// Remove any previous full image, then atomically rename.
 	_ = pm.fs.Remove(tempFullPath)
 	if err := pm.fs.Rename(tempDownloadPath, tempFullPath); err != nil {
 		_ = pm.fs.Remove(tempDownloadPath)
+		if hadFull {
+			if rrErr := pm.fs.Rename(fullParked, tempFullPath); rrErr != nil {
+				logging.Warnf("poster restore %s: %v", tempFullPath, rrErr)
+			}
+		}
 		return nil, fmt.Errorf("failed to finalize image download: %w", err)
+	}
+
+	cropParked := tempCroppedPath + ".dlbak"
+	hadCrop := false
+	if _, stErr := pm.fs.Stat(tempCroppedPath); stErr == nil {
+		if rnErr := pm.fs.Rename(tempCroppedPath, cropParked); rnErr != nil {
+			// audit F-R4-6: the crop leg parks fail-CLOSED like the full leg —
+			// undo the fresh full promote, then refuse the download.
+			_ = pm.fs.Remove(tempFullPath)
+			if hadFull {
+				if rrErr := pm.fs.Rename(fullParked, tempFullPath); rrErr != nil {
+					logging.Warnf("poster restore %s: %v", tempFullPath, rrErr)
+				}
+			}
+			return nil, fmt.Errorf("failed to park previous cropped poster: %w", rnErr)
+		}
+		hadCrop = true
+	} else if !os.IsNotExist(stErr) {
+		// local codex review P1: same fail-closed posture as the rename-failure
+		// arm — undo the fresh full promote, restore, refuse the download.
+		_ = pm.fs.Remove(tempFullPath)
+		if hadFull {
+			if rrErr := pm.fs.Rename(fullParked, tempFullPath); rrErr != nil {
+				logging.Warnf("poster restore %s: %v", tempFullPath, rrErr)
+			}
+		}
+		return nil, fmt.Errorf("failed to inspect previous cropped poster: %w", stErr)
 	}
 
 	// After rename, tempFullPath exists and must be cleaned up if we
@@ -248,7 +298,20 @@ func (pm *PosterManager) DownloadFromURL(ctx context.Context, jobID, posterID, r
 		if !success {
 			_ = pm.fs.Remove(tempFullPath)
 			_ = pm.fs.Remove(tempCroppedPath)
+			if hadFull {
+				if rrErr := pm.fs.Rename(fullParked, tempFullPath); rrErr != nil {
+					logging.Warnf("poster restore %s: %v", tempFullPath, rrErr)
+				}
+			}
+			if hadCrop {
+				if rrErr := pm.fs.Rename(cropParked, tempCroppedPath); rrErr != nil {
+					logging.Warnf("poster restore %s: %v", tempCroppedPath, rrErr)
+				}
+			}
+			return
 		}
+		_ = pm.fs.Remove(fullParked)
+		_ = pm.fs.Remove(cropParked)
 	}()
 
 	// Attempt automatic crop; fall back to a full-image copy on failure.

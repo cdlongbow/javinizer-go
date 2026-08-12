@@ -145,6 +145,15 @@ describe('siblingResultFilePaths', () => {
 		expect(siblingResultFilePaths(results, 'nope')).toEqual([]);
 		expect(siblingResultFilePaths(undefined, 'r1')).toEqual([]);
 	});
+
+	it('folds case across multipart siblings (audit F6)', () => {
+		const mixed = {
+			'/f/ABC-123.mp4': { result_id: 'ra', movie_id: 'ABC-123' },
+			'/f/abc-123-cd2.mp4': { result_id: 'rb', movie_id: 'abc-123' },
+			'/f/other.mp4': { result_id: 'rc', movie_id: 'OTHER-1' },
+		};
+		expect(siblingResultFilePaths(mixed, 'ra')).toEqual(['/f/ABC-123.mp4', '/f/abc-123-cd2.mp4']);
+	});
 });
 
 describe('rescrapeClearedMovieKeys', () => {
@@ -154,10 +163,19 @@ describe('rescrapeClearedMovieKeys', () => {
 			{ movie_id: 'KEEP-002', status: 'success', movie: { id: 'KEEP-002' } },
 			{ movie_id: 'FAIL-003', status: 'failed' },
 		]);
-		expect(keys.has('OLD-001')).toBe(true);
-		expect(keys.has('NEW-001')).toBe(true);
-		expect(keys.has('KEEP-002')).toBe(true);
+		expect(keys.has('old-001')).toBe(true);
+		expect(keys.has('new-001')).toBe(true);
+		expect(keys.has('keep-002')).toBe(true);
 		expect(keys.has('FAIL-003')).toBe(false);
+	});
+
+	it('fold case: an overlay persisted under the OLD spelling clears (codex cloud P1)', () => {
+		const keys = rescrapeClearedMovieKeys([
+			{ movie_id: 'ipx-735', status: 'success', movie: { id: 'IPX-735' } },
+		]);
+		expect(keys.has('ipx-735'), 'old spelling folds in').toBe(true);
+		expect(keys.has('IPX-735'.toLowerCase()), 'new spelling folds to the same key').toBe(true);
+		expect(keys.has('oth-9')).toBe(false);
 	});
 
 	it('empty results clear nothing', () => {
