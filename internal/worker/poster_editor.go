@@ -698,14 +698,14 @@ func sweepEvictionWitness(fs afero.Fs, wpath string) {
 // a crash between the durable write and the physical removals still leaves the
 // reconcile-complete marker on disk (codex cloud P2).
 // writeEvictWitness persists the eviction record inline-BEFORE the tag on the ✔
-func writeEvictWitness(fs afero.Fs, dir, posterID, newSourceURL string) (string, error) {
+func writeEvictWitness(fs afero.Fs, dir, posterID, newSourceURL, forFilePath string) (string, error) {
 	wpath := filepath.Join(dir, ".evict-"+url.PathEscape(posterID)+".json")
 	// codex cloud P2: a never-postered job has NO posters dir — MkdirAll allows
 	// the source-change witness to persist even when nothing was downloaded yet.
 	if mErr := fs.MkdirAll(dir, 0o755); mErr != nil {
 		return "", fmt.Errorf("evict witness dir %s: %w", dir, mErr)
 	}
-	payload, _ := json.Marshal(evictWitness{OldID: posterID, NewSourceURL: newSourceURL})
+	payload, _ := json.Marshal(evictWitness{OldID: posterID, NewSourceURL: newSourceURL, FilePath: forFilePath})
 	if err := writeFileAtomicForEvict(fs, wpath, payload); err != nil {
 		return "", fmt.Errorf("%w", err)
 	}
@@ -1071,7 +1071,7 @@ func (m *LockedMovieOps) UpdateMovieFamily(ctx context.Context, movie *models.Mo
 			if len(relocatedPosterPair) > 0 && strings.TrimSpace(movie.ID) != "" {
 				evictID = strings.TrimSpace(movie.ID)
 			}
-			evictWitnessPath, err = writeEvictWitness(env.fs, dir, evictID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL))
+			evictWitnessPath, err = writeEvictWitness(env.fs, dir, evictID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL), filePaths[0])
 			if err != nil {
 				return fmt.Errorf("stale poster eviction witness %s: %w", evictWitnessPath, err)
 			}
@@ -1176,6 +1176,69 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 	}
 	sanitizePosterCropGeometry(movie, true, result.Movie.Poster.PosterURL, result.Movie.Poster.CoverURL, result.Movie.Poster.ShouldCropPoster)
 
+	// P2 (D6/R13): an override that changed the EFFECTIVE poster source
+	// carries the PATCH path's eviction contract — the witness is journaled
+	// BEFORE the commit, the stale pair is evicted after it lands, and a
+	// failed commit sweeps the never-armed witness. (The committed cropped
+	// URL is already cleared by the mutator.)
+	stalePosterID := ""
+	evictWitnessPath := ""
+	if effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL) != effectivePosterSourceOf(result.Movie.Poster.PosterURL, result.Movie.Poster.CoverURL) {
+		stalePosterID = strings.TrimSpace(result.Movie.ID)
+		if stalePosterID == "" {
+			stalePosterID = m.movieID
+		}
+		if !isSafePosterFileID(stalePosterID) {
+			// codex r33 parity: an unsafe legacy ID must never reach a join — but
+			// the state-side clearing above already keeps the row coherent.
+			logging.Warnf("override source-change eviction skipped: unsafe poster ID %q", stalePosterID)
+			stalePosterID = ""
+		}
+		// codex PR#211 rounds 5+6: the canonical pair is IDENTITY-keyed, but
+		// only a sibling whose rows still reference the OLD effective source
+		// reads those bytes. A share-by-ID alone must not pin the pair forever
+		// (already-migrated siblings would keep the stale bytes alive),
+		// while an untouched sibling mustn't lose its preview.
+		if stalePosterID != "" && m.pe.lookup != nil {
+			oldEffective := effectivePosterSourceOf(result.Movie.Poster.PosterURL, result.Movie.Poster.CoverURL)
+			snap := m.pe.lookup.SnapshotData()
+			bysider := ""
+			for fp, row := range snap.Results {
+				if fp == filePath || row == nil || row.Movie == nil {
+					continue
+				}
+				// codex PR#211 round 9: legacy rows can carry an EMPTY canonical
+				// Movie.ID — their shared identity lives on the matcher alias
+				// (FileMatchInfo.MovieID); compare the effective row identity.
+				rowID := strings.TrimSpace(row.Movie.ID)
+				if rowID == "" {
+					rowID = strings.TrimSpace(row.FileMatchInfo.MovieID)
+				}
+				if !strings.EqualFold(rowID, stalePosterID) {
+					continue
+				}
+				if effectivePosterSourceOf(row.Movie.Poster.PosterURL, row.Movie.Poster.CoverURL) == oldEffective {
+					bysider = fp
+					break
+				}
+			}
+			if bysider != "" {
+				logging.Infof("override source-change eviction skipped for %s: %s still uses the old source", stalePosterID, bysider)
+				stalePosterID = ""
+			}
+		}
+		if stalePosterID != "" {
+			if env := m.pe.currentEnv(); env != nil && env.fs != nil && env.tempDir != "" && env.jobID != "" {
+				dir := filepath.Join(env.tempDir, "posters", env.jobID)
+				wp, werr := writeEvictWitness(env.fs, dir, stalePosterID, effectivePosterSourceOf(movie.Poster.PosterURL, movie.Poster.CoverURL), filePath)
+				if werr != nil {
+					return nil, nil, fmt.Errorf("stale poster eviction witness %s: %w", wp, werr)
+				}
+				evictWitnessPath = wp
+			}
+		}
+	}
+
 	cand := result.Clone()
 	cand.Movie = movie
 	cand.FileMatchInfo.MovieID = movie.ID
@@ -1197,7 +1260,19 @@ func (m *LockedMovieOps) ApplyFieldOverride(ctx context.Context, resultID, field
 		plan.UpsertMovie = movie
 		plan.Renames = renames
 	}); err != nil {
+		if evictWitnessPath != "" {
+			// Commit never landed ⇒ the eviction never armed; the record is pure
+			// litter, swept best-effort (a durable failure leaves it for startup).
+			if env := m.pe.currentEnv(); env != nil && env.fs != nil {
+				sweepEvictionWitness(env.fs, evictWitnessPath)
+			}
+		}
 		return nil, nil, fmt.Errorf("persist field override: %w", err)
+	}
+	if evictWitnessPath != "" && stalePosterID != "" {
+		// Post-commit, always under this same locked section: remove the stale
+		// pair; a failed leg keeps the witness for startup reconcile.
+		m.evictStalePosterPair(stalePosterID, evictWitnessPath)
 	}
 	updated, _, _ := m.pe.lookup.GetFileResultByResultID(resultID)
 	updatedProv := m.pe.lookup.GetProvenance(filePath)
