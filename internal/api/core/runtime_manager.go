@@ -434,8 +434,10 @@ func (s *RuntimeSnapshot) PosterManager() poster.PosterManagerInterface {
 	}
 	r := s.rt
 	buildFromSnap := func() poster.PosterManagerInterface {
-		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
-		return poster.NewPosterManager(r.deps.GetFs(), s.cfg.System.TempDir, httpClient)
+		httpClient := ssrf.NewSSRFSafeClient(0)
+		idleTimeout := time.Duration(s.cfg.Output.Download.DownloadTimeout) * time.Second
+		setPosterHeaderTimeout(httpClient, idleTimeout)
+		return poster.NewPosterManager(r.deps.GetFs(), s.cfg.System.TempDir, httpClient, idleTimeout)
 	}
 	rs := r.GetRuntime()
 	if rs == nil {
@@ -639,17 +641,19 @@ func (r *APIRuntime) GetPosterManager() poster.PosterManagerInterface {
 	rs := r.GetRuntime()
 	if rs == nil {
 		// Fallback: create a fresh instance if runtime state is not yet initialized.
-		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
-		return poster.NewPosterManager(r.deps.GetFs(), cfg.System.TempDir, httpClient)
+		httpClient := ssrf.NewSSRFSafeClient(0)
+		idleTimeout := time.Duration(cfg.Output.Download.DownloadTimeout) * time.Second
+		setPosterHeaderTimeout(httpClient, idleTimeout)
+		return poster.NewPosterManager(r.deps.GetFs(), cfg.System.TempDir, httpClient, idleTimeout)
 	}
 
 	return rs.GetPosterManager(func() poster.PosterManagerInterface {
-		httpClient := ssrf.NewSSRFSafeClient(60 * time.Second)
-		return poster.NewPosterManager(r.deps.GetFs(), cfg.System.TempDir, httpClient)
+		httpClient := ssrf.NewSSRFSafeClient(0)
+		idleTimeout := time.Duration(cfg.Output.Download.DownloadTimeout) * time.Second
+		setPosterHeaderTimeout(httpClient, idleTimeout)
+		return poster.NewPosterManager(r.deps.GetFs(), cfg.System.TempDir, httpClient, idleTimeout)
 	})
 }
-
-// Server lifecycle methods (ServerCtx, Shutdown) are defined in server_lifecycle.go.
 
 // SetConfig sets the full application config and rebuilds the APIConfig snapshot.
 // This is a convenience method for test setup. Production code should use
@@ -668,10 +672,6 @@ func (r *APIRuntime) SetConfig(cfg *config.Config) {
 	r.invalidateFactoriesLocked(cfg)
 }
 
-// ReloadConfig is defined in hot_reload.go.
-
-// InvalidateWorkflowCaches and InvalidateWorkflowCachesOnRuntime are defined in hot_reload.go.
-
 // shutdownDeps gracefully shuts down runtime resources in APIRuntime.
 //
 //nolint:unused // used by same-package tests
@@ -685,8 +685,6 @@ func shutdownDeps(rt *APIRuntime) {
 	}
 	rs.Shutdown()
 }
-
-// invalidateFactories is defined in hot_reload.go.
 
 // ---------------------------------------------------------------------------
 // Legacy compatibility — these package-level functions delegate to APIRuntime.
