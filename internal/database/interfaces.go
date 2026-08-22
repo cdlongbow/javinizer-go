@@ -155,6 +155,36 @@ type BatchFileOperationRepositoryInterface interface {
 	CountByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error)
 	// CountRevertedByBatchJobIDs returns a map of jobID→reverted count for all given job IDs.
 	CountRevertedByBatchJobIDs(ctx context.Context, jobIDs []string) (map[string]int64, error)
+	// FindOperationsByDestination returns every operation whose generated-files ledger
+	// holds a replacement journal entry for destination — SQL LIKE pre-filter plus
+	// exact in-process filter (POSTER-WRITE-HARDENING P3 revert-ledger read path).
+	FindOperationsByDestination(ctx context.Context, destination string) ([]models.BatchFileOperation, error)
+	// FindOperationsWithReplacements returns every operation whose ledger journals
+	// at least one replacement — the replacement sweeper's row scan (P3).
+	FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error)
+	// FindOperationsWithLedger returns every operation carrying ANY generated-files
+	// ledger (delete/move-back/replacements). The sweeper derives destination
+	// directories from it so pre-journal crash windows (backup set aside, process
+	// died before RecordReplacement) remain discoverable (codex P3 R2-3).
+	FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error)
+	// UpdateJournalInTx atomically rewrites one row's generated-files journal:
+	// BEGIN IMMEDIATE → re-read the row → fn merges against that fresh state →
+	// UPDATE generated_files only → COMMIT (POSTER-WRITE-HARDENING review
+	// 4960250562 — durable cross-process serialization beyond the process-local
+	// journal locks and per-destination .dlbusy markers).
+	UpdateJournalInTx(ctx context.Context, id uint, fn JournalUpdateFn) error
+	// UpdateNonJournalFields persists one row's non-journal columns WITHOUT
+	// writing generated_files: the journal column is owned exclusively by
+	// UpdateJournalInTx, so a completion's post-transaction column update must
+	// never re-persist its (possibly stale) journal snapshot — a concurrent
+	// append/consume committed in between would otherwise be erased/resurrected
+	// (POSTER-WRITE-HARDENING wave-10 codex follow-up).
+	// Wave-15: the revert-status columns are conditional — they persist only
+	// while the STORED row is not already reverted, so a completion carrying a
+	// stale Applied/Failed snapshot can never resurface a concurrently
+	// reverted operation as live; a suppressed status write reports
+	// ErrOperationRowReverted with the non-status columns committed.
+	UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error
 }
 
 // ApiTokenRepositoryInterface defines the contract for API token operations

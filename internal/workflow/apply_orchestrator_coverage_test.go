@@ -148,6 +148,26 @@ func (r *recordingRevertLog) CompleteFailed(_ context.Context, _ OperationID, re
 	return nil
 }
 
+func (r *recordingRevertLog) ConfirmReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (r *recordingRevertLog) MarkReplacementRestorePending(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (r *recordingRevertLog) MarkReplacementRestorePendingKind(_ context.Context, _ OperationID, _, _, _ string) error {
+	return nil
+}
+
+func (r *recordingRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (r *recordingRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
+	return nil
+}
+
 // completeErrorRevertLog returns an error from Complete
 type completeErrorRevertLog struct {
 	noOpRevertLog

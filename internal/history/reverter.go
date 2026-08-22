@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"sync"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
@@ -51,6 +53,10 @@ type RevertFileResult struct {
 	Outcome      models.RevertOutcomeEnum // RevertOutcome: reverted, skipped, or failed
 	Reason       models.RevertReasonEnum  // RevertReason: why the outcome occurred (empty for success)
 	Error        string                   // Error message for failed outcomes
+
+	// orderRetryable marks cross-operation ORDER rejections: the run retries
+	// the operation once its blocker's journal entries are consumed (R6-1).
+	orderRetryable bool
 }
 
 var (
@@ -60,6 +66,11 @@ var (
 	ErrCopyModeNotRevertible = errors.New("copy-mode operations cannot be reverted")
 	// ErrNoOperationsFound is returned when no operations exist for the given batch.
 	ErrNoOperationsFound = errors.New("no operations found for batch")
+
+	// canonicalizeNFOPathFunc is a narrow seam for the soft NFO restore fallback.
+	// filepath.Abs normally succeeds for ordinary test paths, so forcing its
+	// error without changing the process working directory is otherwise brittle.
+	canonicalizeNFOPathFunc = fsutil.CanonicalizePath
 )
 
 // fileSystemReverter abstracts filesystem revert operations so that Reverter.revertFile
@@ -89,7 +100,8 @@ type fileSystemReverter interface {
 type Reverter struct {
 	fs              afero.Fs
 	batchFileOpRepo database.BatchFileOperationRepositoryInterface
-	fsReverter      fileSystemReverter // filesystem operations seam
+	fsReverter      fileSystemReverter  // filesystem operations seam
+	sweeper         *ReplacementSweeper // P3 crash-window sweep before revert
 }
 
 // failRevert records a failed revert in the database and returns a RevertFileResult
@@ -131,6 +143,9 @@ func NewReverter(fs afero.Fs, batchFileOpRepo database.BatchFileOperationReposit
 		batchFileOpRepo: batchFileOpRepo,
 	}
 	r.fsReverter = &aferoFSReverter{fs: fs, batchFileOpRepo: batchFileOpRepo}
+	if fs != nil && batchFileOpRepo != nil {
+		r.sweeper = NewReplacementSweeper(fs, batchFileOpRepo)
+	}
 	return r
 }
 
@@ -158,15 +173,112 @@ func (a *aferoFSReverter) restoreNFO(ctx context.Context, op *models.BatchFileOp
 	return restoreNFOFS(ctx, a.fs, a.batchFileOpRepo, op, hardFailure)
 }
 
+// operationRevertLockRegistry serializes the complete revert flow for one
+// operation, including journal replay and the primary file move. The keyed
+// registry keeps unrelated operations parallel; active is only contention
+// accounting because it is incremented before the keyed lock is acquired.
+type operationRevertLockRegistry struct {
+	registry *fsutil.KeyedLockRegistry
+	mu       sync.Mutex
+	active   map[string]int
+
+	// Optional synchronization seams make the active-count/keyed-lock gap
+	// deterministic in concurrency regression tests without changing the
+	// production lock order.
+	afterActiveIncrement func(key string)
+	afterAcquire         func(key string, waited bool)
+}
+
+func newOperationRevertLockRegistry() *operationRevertLockRegistry {
+	return &operationRevertLockRegistry{
+		registry: fsutil.NewKeyedLockRegistry(),
+		active:   make(map[string]int),
+	}
+}
+
+func (r *operationRevertLockRegistry) acquire(key string) (func(), bool) {
+	r.mu.Lock()
+	waited := r.active[key] > 0
+	r.active[key]++
+	r.mu.Unlock()
+
+	if r.afterActiveIncrement != nil {
+		r.afterActiveIncrement(key)
+	}
+	releaseKey := r.registry.Acquire(key)
+	if r.afterAcquire != nil {
+		r.afterAcquire(key, waited)
+	}
+	return func() {
+		releaseKey()
+		r.mu.Lock()
+		r.active[key]--
+		if r.active[key] == 0 {
+			delete(r.active, key)
+		}
+		r.mu.Unlock()
+	}, waited
+}
+
+// revertOperationLocks is process-wide so separate Reverter instances (for
+// example, concurrent API requests) still serialize the same operation.
+var revertOperationLocks = newOperationRevertLockRegistry()
+
 func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error) {
+	release, _ := revertOperationLocks.acquire(fmt.Sprintf("rev-op:%d", op.ID))
+	defer release()
+
+	// Refresh after every keyed-lock acquisition. The active count is bumped
+	// before registry.Acquire, so a caller that reports waited=false can still
+	// have been preempted while another caller acquired the keyed lock first.
+	// The fresh row is authoritative for both resume and already-reverted
+	// abort paths before any journal, primary, cleanup, or NFO leg runs.
+	fresh, err := r.batchFileOpRepo.FindByID(ctx, op.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to re-read operation %d after acquiring revert lock: %w", op.ID, err)
+	}
+	if fresh == nil {
+		return nil, fmt.Errorf("failed to re-read operation %d after acquiring revert lock: row not found", op.ID)
+	}
+	*op = *fresh
+
 	logging.Debugf("Reverting operation %d: movie=%s type=%s original=%s new=%s revert_status=%s",
 		op.ID, op.MovieID, op.OperationType, op.OriginalPath, op.NewPath, op.RevertStatus)
 
 	if result, err := r.guardDoubleRevert(ctx, op); result != nil || err != nil {
 		return result, err
 	}
+
+	// P3: replay the replacement journal BEFORE the anchor check AND before
+	// the copy-mode rejection (codex P3 R2-1/R6-in-2): a deleted primary
+	// anchor must not strand independently recoverable overwritten media —
+	// least of all for copy-mode operations whose only forward-recoverable
+	// state IS the journal. Restored destinations are structurally excluded
+	// from the generated-file Delete list. Order rejections are tagged
+	// retryable for this run's fixpoint.
+	restored, rejErr := r.restoreReplacementJournal(ctx, op)
+	if rejErr != nil {
+		logging.Warnf("Replacement journal restore refused/failed for op %d: %v", op.ID, rejErr)
+		return rejectedRevert(op, rejErr).withRetryable(rejErr), nil
+	}
+
+	// Journal replay may have refreshed a stale caller snapshot. Re-check the
+	// status before touching the primary path so a request that entered just
+	// after another request finished cannot run the primary revert twice.
+	if result, err := r.guardDoubleRevert(ctx, op); result != nil || err != nil {
+		return result, err
+	}
+
 	if result, err := r.checkAnchor(ctx, op); result != nil || err != nil {
 		return result, err
+	}
+
+	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
+		msg := ErrCopyModeNotRevertible.Error()
+		if len(restored) > 0 {
+			msg += fmt.Sprintf(" (%d journaled replacement(s) restored first)", len(restored))
+		}
+		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, msg), nil
 	}
 
 	isUpdate := op.OperationType == models.OperationTypeUpdate
@@ -191,6 +303,7 @@ func (r *Reverter) revertFile(ctx context.Context, op *models.BatchFileOperation
 	if err := r.batchFileOpRepo.UpdateRevertStatus(ctx, op.ID, models.RevertStatusReverted); err != nil {
 		return nil, fmt.Errorf("filesystem reverted but failed to persist revert status for op %d: %w", op.ID, err)
 	}
+	op.RevertStatus = models.RevertStatusReverted
 
 	result := &RevertFileResult{
 		OperationID:  op.ID,
@@ -217,10 +330,6 @@ func (r *Reverter) guardDoubleRevert(ctx context.Context, op *models.BatchFileOp
 
 	if op.RevertStatus != models.RevertStatusApplied && op.RevertStatus != models.RevertStatusFailed {
 		return nil, fmt.Errorf("operation has unexpected revert status: %s", op.RevertStatus)
-	}
-
-	if op.OperationType != models.OperationTypeMove && op.OperationType != models.OperationTypeUpdate {
-		return failRevert(ctx, r.batchFileOpRepo, op, models.RevertReasonUnexpectedPathState, ErrCopyModeNotRevertible.Error()), nil
 	}
 
 	return nil, nil
@@ -376,7 +485,7 @@ func restoreNFOHardFailure(ctx context.Context, fs afero.Fs, batchFileOpRepo dat
 
 func restoreNFOSoftFailure(fs afero.Fs, op *models.BatchFileOperation, nfoPath string) (string, *RevertFileResult) {
 	nfoDir := filepath.Dir(op.OriginalPath)
-	canonicalNfoDir, err := fsutil.CanonicalizePath(nfoDir)
+	canonicalNfoDir, err := canonicalizeNFOPathFunc(nfoDir)
 	if err != nil {
 		logging.Warnf("restoreNFOSoftFailure: failed to resolve absolute path for %q: %v", nfoDir, err)
 		canonicalNfoDir = filepath.Clean(nfoDir)
@@ -442,7 +551,10 @@ func cleanupGeneratedFilesFS(fs afero.Fs, op *models.BatchFileOperation, stopAt 
 	}
 	// Track parent directories of deleted files for cleanup
 	dirsToCheck := make(map[string]bool)
-	// Delete files in the Delete array (best-effort — skip IsNotExist)
+	// Delete is populated at journal-write time from op-created paths only;
+	// replaced destinations are journaled separately in Replacements. Restored
+	// pre-existing destinations are therefore never members of Delete, so this
+	// cleanup cannot delete anything put back by replacement restore.
 	for _, path := range gf.Delete {
 		if err := fs.Remove(path); err != nil && !os.IsNotExist(err) {
 			logging.Debugf("cleanupGeneratedFiles: failed to remove %s: %v", path, err)
@@ -522,24 +634,80 @@ func cleanupEmptyDirDownwardFS(fs afero.Fs, dirPath string, stopAt string) {
 // (best-effort: individual failures don't abort the batch). Returns the ordered
 // list of per-operation results.
 func (r *Reverter) revertOperations(ctx context.Context, ops []models.BatchFileOperation, revertFn func(ctx context.Context, op *models.BatchFileOperation) (*RevertFileResult, error)) []RevertFileResult {
+	// P3 + codex R6-1: per-destination sequences are not chronologically
+	// comparable ACROSS destinations, so newest-first per-op maxima are only
+	// an approximation. A newer-applied rejection is therefore RETRIED once
+	// its blocker's entries are consumed — passes iterate to a fixpoint and
+	// terminate because consumption shrinks journals monotonically.
+	remaining := append([]models.BatchFileOperation(nil), ops...)
 	var outcomes []RevertFileResult
-	for i := range ops {
-		op := &ops[i]
-		res, sysErr := revertFn(ctx, op)
-		if sysErr != nil {
-			outcomes = append(outcomes, RevertFileResult{
-				OperationID:  op.ID,
-				MovieID:      op.MovieID,
-				OriginalPath: op.OriginalPath,
-				NewPath:      op.NewPath,
-				Outcome:      models.RevertOutcomeFailed,
-				Error:        sysErr.Error(),
-			})
-			continue
+	for {
+		sort.SliceStable(remaining, func(i, j int) bool {
+			return maxJournalSeq(&remaining[i]) > maxJournalSeq(&remaining[j])
+		})
+		progressed := false
+		var retryNext []models.BatchFileOperation
+		for i := range remaining {
+			op := &remaining[i]
+			// R18-1: CONSUMPTION is progress too — a blocker whose journal got
+			// replayed but whose primary anchor was missing lands Skipped;
+			// counted as progress, deeper chains (A←B←C) keep unwinding.
+			journaledBefore := len(mustJournal(op))
+			res, sysErr := revertFn(ctx, op)
+			if journaledAfter := len(mustJournal(op)); journaledAfter < journaledBefore {
+				progressed = true
+			}
+			if sysErr != nil {
+				outcomes = append(outcomes, RevertFileResult{
+					OperationID:  op.ID,
+					MovieID:      op.MovieID,
+					OriginalPath: op.OriginalPath,
+					NewPath:      op.NewPath,
+					Outcome:      models.RevertOutcomeFailed,
+					Error:        sysErr.Error(),
+				})
+				continue
+			}
+			if res.orderRetryable {
+				retryNext = append(retryNext, *op)
+				continue
+			}
+			outcomes = append(outcomes, *res)
+			if res.Outcome == models.RevertOutcomeReverted {
+				progressed = true
+			}
 		}
-		outcomes = append(outcomes, *res)
+		if len(retryNext) == 0 {
+			break
+		}
+		if !progressed {
+			// No blocker reverted this pass — re-run once so the standing
+			// rejection is reported as a normal (final) outcome.
+			for i := range retryNext {
+				op := &retryNext[i]
+				res, sysErr := revertFn(ctx, op)
+				if sysErr != nil {
+					outcomes = append(outcomes, RevertFileResult{OperationID: op.ID, MovieID: op.MovieID, OriginalPath: op.OriginalPath, NewPath: op.NewPath, Outcome: models.RevertOutcomeFailed, Error: sysErr.Error()})
+					continue
+				}
+				res.orderRetryable = false
+				outcomes = append(outcomes, *res)
+			}
+			break
+		}
+		remaining = retryNext
 	}
 	return outcomes
+}
+
+// mustJournal optimistically parses an op's replacement journal (zero on
+// malformed/absent).
+func mustJournal(op *models.BatchFileOperation) []models.ReplacementEntry {
+	gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+	if err != nil {
+		return nil
+	}
+	return gf.Replacements
 }
 
 // summarizeOutcomes computes aggregate succeeded/skipped/failed counts from
@@ -603,6 +771,25 @@ func (r *Reverter) RevertBatch(ctx context.Context, batchJobID string) (*RevertB
 		return nil, ErrNoOperationsFound
 	}
 
+	r.sweepJournaledDestinations(ctx, processable)
+
+	// leniently-promote reload: the sweep consumed/persisted; re-read the rows so
+	// the revert's in-memory journal can't chase backups the sweep deleted.
+	if len(processable) > 0 {
+		fresh, freshErr := r.batchFileOpRepo.FindByBatchJobID(ctx, processable[0].BatchJobID)
+		if freshErr == nil {
+			byID := make(map[uint]models.BatchFileOperation, len(fresh))
+			for i := range fresh {
+				byID[fresh[i].ID] = fresh[i]
+			}
+			for i := range processable {
+				if freshRow, ok := byID[processable[i].ID]; ok {
+					processable[i] = freshRow
+				}
+			}
+		}
+	}
+
 	outcomes := r.revertOperations(ctx, processable, r.revertFile)
 	succeeded, skipped, failed := summarizeOutcomes(outcomes)
 
@@ -649,6 +836,23 @@ func (r *Reverter) RevertScrape(ctx context.Context, batchJobID string, movieID 
 
 	if len(matching) == 0 {
 		return nil, fmt.Errorf("no processable operations found for movie %s in batch %s", movieID, batchJobID)
+	}
+
+	r.sweepJournaledDestinations(ctx, matching)
+
+	if len(matching) > 0 {
+		fresh, freshErr := r.batchFileOpRepo.FindByBatchJobID(ctx, matching[0].BatchJobID)
+		if freshErr == nil {
+			byID := make(map[uint]models.BatchFileOperation, len(fresh))
+			for i := range fresh {
+				byID[fresh[i].ID] = fresh[i]
+			}
+			for i := range matching {
+				if freshRow, ok := byID[matching[i].ID]; ok {
+					matching[i] = freshRow
+				}
+			}
+		}
 	}
 
 	outcomes := r.revertOperations(ctx, matching, r.revertFile)

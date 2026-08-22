@@ -298,6 +298,34 @@ func TestCleanupGeneratedFilesFS_MissingFileSkipped(t *testing.T) {
 	cleanupGeneratedFilesFS(fs, op, "/dst")
 }
 
+func TestCleanupGeneratedFilesFS_LogsRemoveAndMoveBackErrors(t *testing.T) {
+	base := afero.NewMemMapFs()
+	require.NoError(t, base.MkdirAll("/dst", 0777))
+	require.NoError(t, afero.WriteFile(base, "/dst/delete.err", []byte("delete"), 0666))
+	require.NoError(t, afero.WriteFile(base, "/dst/move.err", []byte("move"), 0666))
+
+	fs := &removeFailFs{
+		Fs:     &renameErrorFs{Fs: base},
+		victim: "/dst/delete.err",
+	}
+	gf := models.GeneratedFilesJSON{
+		Delete:   []string{"/dst/delete.err"},
+		MoveBack: []models.FileMove{{OriginalPath: "/src/move.err", NewPath: "/dst/move.err"}},
+	}
+	gfJSON, err := json.Marshal(gf)
+	require.NoError(t, err)
+
+	op := &models.BatchFileOperation{GeneratedFiles: string(gfJSON)}
+	cleanupGeneratedFilesFS(fs, op, "/dst")
+
+	_, err = fs.Stat("/dst/delete.err")
+	require.NoError(t, err, "remove failure should leave the delete path in place")
+	_, err = fs.Stat("/dst/move.err")
+	require.NoError(t, err, "rename failure should leave the move-back source in place")
+	_, err = fs.Stat("/src/move.err")
+	require.Error(t, err, "rename failure should not create the move-back destination")
+}
+
 // ============================================================================
 // restoreNFOFS tests
 // ============================================================================
@@ -764,6 +792,7 @@ func TestRevertBatch_SuccessfulRevert(t *testing.T) {
 		},
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(300)).Return(&ops[0], nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(300), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -804,6 +833,7 @@ func TestRevertBatch_MixedStatuses(t *testing.T) {
 		},
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(301)).Return(&ops[0], nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(301), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -897,6 +927,7 @@ func TestRevertScrape_Success(t *testing.T) {
 		},
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(401)).Return(&ops[0], nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(401), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -935,6 +966,7 @@ func TestRevertOperations_SystemError(t *testing.T) {
 		},
 	}
 	mockRepo.On("FindByBatchJobID", mock.Anything, "batch-1").Return(ops, nil)
+	mockRepo.On("FindByID", mock.Anything, uint(500)).Return(&ops[0], nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(500), models.RevertStatusReverted).Return(errors.New("db persist failed"))
 
 	r := NewReverter(fs, mockRepo)
@@ -987,16 +1019,25 @@ func TestGuardDoubleRevert_CopyModeNotRevertible(t *testing.T) {
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(600), models.RevertStatusFailed).Return(nil)
 	r := NewReverter(fs, mockRepo)
 
+	// P3: the copy-mode rejection now happens INSIDE revertFile, after the
+	// replacement-journal replay — the guard helper itself is status-only.
+	// Anchor (copy-mode: NewPath) present so the flow reaches the type gate.
+	require.NoError(t, fs.MkdirAll("/dst/T600", 0o755))
+	require.NoError(t, afero.WriteFile(fs, "/dst/T600/T600.mkv", []byte("video"), 0o644))
 	op := &models.BatchFileOperation{
 		ID:            600,
 		RevertStatus:  models.RevertStatusApplied,
 		OperationType: models.OperationTypeCopy,
+		NewPath:       "/dst/T600/T600.mkv",
+		OriginalPath:  "/src/T600.mkv",
 	}
-	result, err := r.guardDoubleRevert(context.Background(), op)
+	mockRepo.On("FindByID", mock.Anything, uint(600)).Return(op, nil)
+	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.NotNil(t, result)
 	assert.Equal(t, models.RevertOutcomeFailed, result.Outcome)
 	assert.Equal(t, models.RevertReasonUnexpectedPathState, result.Reason)
+	assert.Contains(t, result.Error, "cannot be reverted")
 	mockRepo.AssertExpectations(t)
 }
 
@@ -1097,6 +1138,7 @@ func TestRevertFile_UpdateOperation(t *testing.T) {
 		NFOSnapshot:   "<original/>",
 		NFOPath:       "/src/ABC-123.nfo",
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(800)).Return(op, nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(800), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -1121,6 +1163,7 @@ func TestRevertFile_MoveOperation(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(801)).Return(op, nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(801), models.RevertStatusReverted).Return(nil)
 
 	r := NewReverter(fs, mockRepo)
@@ -1145,6 +1188,7 @@ func TestRevertFile_AlreadyReverted(t *testing.T) {
 		RevertStatus:  models.RevertStatusReverted,
 		OperationType: models.OperationTypeMove,
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(802)).Return(op, nil)
 	result, err := r.revertFile(context.Background(), op)
 	assert.Nil(t, result)
 	assert.Equal(t, ErrBatchAlreadyReverted, err)
@@ -1163,6 +1207,7 @@ func TestRevertFile_AnchorMissing(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(803)).Return(op, nil)
 	result, err := r.revertFile(context.Background(), op)
 	require.NoError(t, err)
 	assert.Equal(t, models.RevertOutcomeSkipped, result.Outcome)
@@ -1184,6 +1229,7 @@ func TestRevertFile_DBPersistFails(t *testing.T) {
 		OperationType: models.OperationTypeMove,
 		RevertStatus:  models.RevertStatusApplied,
 	}
+	mockRepo.On("FindByID", mock.Anything, uint(804)).Return(op, nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(804), models.RevertStatusReverted).Return(errors.New("db write failed"))
 
 	r := NewReverter(fs, mockRepo)
@@ -1212,6 +1258,7 @@ func TestRevertFile_WithNFOWarning(t *testing.T) {
 		NFOPath:       "/src/ABC-123.nfo",
 	}
 	// NFO write will fail due to nfoWriteErrorFs, but it's a soft failure in move mode
+	mockRepo.On("FindByID", mock.Anything, uint(805)).Return(op, nil)
 	mockRepo.On("UpdateRevertStatus", mock.Anything, uint(805), models.RevertStatusReverted).Return(nil)
 
 	errorFs := &nfoWriteErrorFs{Fs: fs}

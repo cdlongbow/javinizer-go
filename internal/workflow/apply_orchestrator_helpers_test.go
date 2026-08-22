@@ -74,3 +74,23 @@ func (s *stubRevertLog) CompleteFailed(_ context.Context, opID OperationID, _ *A
 	s.completeCalls = append(s.completeCalls, opID)
 	return nil
 }
+
+func (s *stubRevertLog) ConfirmReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (s *stubRevertLog) MarkReplacementRestorePending(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (s *stubRevertLog) MarkReplacementRestorePendingKind(_ context.Context, _ OperationID, _, _, _ string) error {
+	return nil
+}
+
+func (s *stubRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (s *stubRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
+	return nil
+}

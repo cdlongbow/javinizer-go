@@ -3,8 +3,10 @@ package history
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
+	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
@@ -51,8 +53,89 @@ func (m *mockBatchFileOpRepo) FindByBatchJobIDAndRevertStatus(ctx context.Contex
 	return nil, nil
 }
 
+func (m *mockBatchFileOpRepo) FindOperationsWithLedger(ctx context.Context) ([]models.BatchFileOperation, error) {
+	matched := make([]models.BatchFileOperation, 0, len(m.ops))
+	for _, op := range m.ops {
+		if op.GeneratedFiles != "" {
+			matched = append(matched, *op)
+		}
+	}
+	return matched, nil
+}
+
+func (m *mockBatchFileOpRepo) FindOperationsWithReplacements(ctx context.Context) ([]models.BatchFileOperation, error) {
+	matched := make([]models.BatchFileOperation, 0, 1)
+	for _, op := range m.ops {
+		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+		if err == nil && len(gf.Replacements) > 0 {
+			matched = append(matched, *op)
+		}
+	}
+	return matched, nil
+}
+
+func (m *mockBatchFileOpRepo) FindOperationsByDestination(ctx context.Context, destination string) ([]models.BatchFileOperation, error) {
+	matched := make([]models.BatchFileOperation, 0, 1)
+	for _, op := range m.ops {
+		gf, err := models.ParseGeneratedFiles(op.GeneratedFiles)
+		if err != nil {
+			continue
+		}
+		for _, rep := range gf.Replacements {
+			if rep.Destination == destination {
+				matched = append(matched, *op)
+				break
+			}
+		}
+	}
+	return matched, nil
+}
+
 func (m *mockBatchFileOpRepo) Update(ctx context.Context, op *models.BatchFileOperation) error {
 	m.ops[op.ID] = op
+	return nil
+}
+
+// UpdateNonJournalFields mirrors the wave-15 production contract in-memory:
+// non-journal columns follow op while the stored row keeps its journal and,
+// when the stored row is already reverted while op carries a completion
+// status, its reverted status (the typed race error surfaces, exactly like
+// the sqlite repository's ErrOperationRowReverted).
+func (m *mockBatchFileOpRepo) UpdateNonJournalFields(ctx context.Context, op *models.BatchFileOperation) error {
+	cp := *op
+	if stored, ok := m.ops[op.ID]; ok {
+		cp.GeneratedFiles = stored.GeneratedFiles
+		if stored.RevertStatus == models.RevertStatusReverted && op.RevertStatus != models.RevertStatusReverted {
+			cp.RevertStatus = stored.RevertStatus
+			cp.RevertedAt = stored.RevertedAt
+			m.ops[op.ID] = &cp
+			return fmt.Errorf("w15 mirror: %w: batch file operation %d", database.ErrOperationRowReverted, op.ID)
+		}
+	}
+	m.ops[op.ID] = &cp
+	return nil
+}
+
+// UpdateJournalInTx mirrors the production journal transaction for the
+// in-memory fixture: the stored row is re-read lean and the merge result
+// replaces its generated-files ledger only when persist is requested.
+func (m *mockBatchFileOpRepo) UpdateJournalInTx(ctx context.Context, id uint, fn database.JournalUpdateFn) error {
+	stored, ok := m.ops[id]
+	if !ok {
+		return fmt.Errorf("update journal tx row %d: %w", id, database.ErrNotFound)
+	}
+	current := &models.BatchFileOperation{
+		ID:             stored.ID,
+		GeneratedFiles: stored.GeneratedFiles,
+		RevertStatus:   stored.RevertStatus,
+	}
+	next, persist, err := fn(current)
+	if err != nil {
+		return err
+	}
+	if persist {
+		stored.GeneratedFiles = models.MarshalLedgerJSON(next)
+	}
 	return nil
 }
 

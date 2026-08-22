@@ -19,6 +19,7 @@ import (
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
 	"github.com/javinizer/javinizer-go/internal/httpclient"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/spf13/afero"
 )
 
@@ -67,12 +68,14 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	default:
 	}
 
-	existed := false
+	// Existence is classified TWICE on overwrite: here, fail-fast before any
+	// network fetch (stat wedges abort the download); then AGAIN inside the
+	// install-time destination lock (the bounded section that must be racing
+	// correct — two ops can never both classify "create" for one slot).
 	if overwriteExisting {
 		info, err := d.fs.Stat(destPath)
 		switch {
 		case err == nil:
-			existed = true
 			result.Size = info.Size()
 		case os.IsNotExist(err):
 		default:
@@ -129,8 +132,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	tempPath := uniqueTempPath(destPath, "tmp")
-	outFile, err := d.fs.Create(tempPath)
+	tempPath, outFile, err := createDownloadTempFile(d.fs, destPath)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to create file: %w", err)
 		result.Duration = time.Since(startTime)
@@ -180,23 +182,137 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 		return result, result.Error
 	}
 
-	if err := validateDownloadedMedia(d.fs, tempPath, resp.Header.Get("Content-Type"), destPath); err != nil {
+	validatedInfo, validatedHandle, err := validateDownloadedMedia(d.fs, tempPath, resp.Header.Get("Content-Type"), destPath)
+	if err != nil {
 		_ = d.fs.Remove(tempPath)
 		result.Error = err
 		result.Duration = time.Since(startTime)
 		return result, result.Error
 	}
+	// Wave-45 (codex P2, PR#215 finding F1): freeze the VALIDATED object's
+	// identity (from the open handle the sniffer just read) into the install
+	// provenance snapshot — installOverwriting re-proves the staged name
+	// against it before every publish, so a substitute planted between
+	// validation and install is refused instead of landing at destPath.
+	// Wave-48 (codex P2, PR#215 finding 6): the validated handle itself stays
+	// OPEN and rides with the record — installOverwriting owns it end to end
+	// (the bound publishes consume it; every other exit closes it), so the
+	// publish never mutates the destination with a staging object merely
+	// re-derived by PATH.
+	provenance := stagedInstallProvenance{
+		identity: installedIdentityFromFileInfo(validatedInfo),
+		handle:   validatedHandle,
+	}
 
-	if err := fsutil.ReplaceFile(d.fs, tempPath, destPath); err != nil {
-		_ = d.fs.Remove(tempPath)
-		result.Error = fmt.Errorf("failed to replace file: %w", err)
+	// P3: the byte install runs through the overwrite discipline — per-dest
+	// lock, in-lock existence classification, ledger-armed skip+warn for
+	// unrecorded replacements, backup-aside + restore-on-failure.
+	// Wave-67 (codex P2, PR#215 — producer-side provenance binding): the
+	// install hands back its own post-publish-VERIFIED destination identity
+	// (the record it already proved at publish time — no extra filesystem
+	// work), and the completed legs file it on the result as the producer
+	// record. Wave-68 (codex P2, PR#215 F2): the completed-with-error
+	// (wave-41) leg now files the verified identity too when the bound publish
+	// handed one back (waves 61/62 — the ENOSYS-times-skipped leg); when the
+	// identity is genuinely unavailable (virtual-fs posture, or
+	// ErrPublishCompleted without a dest info binding) the leg refuses to
+	// certify an unproven publish instead of filing an unknown record
+	// (consumers keep the wave-53 fail-closed posture).
+	ledger := resolveDownloadLedger(options)
+	var installedID installedDestIdentity
+	skipped, replaced, instErr := d.installOverwritingIdentity(ctx, tempPath, destPath, ledger, &installedID, provenance)
+	if instErr != nil {
+		// Wave-45 (codex P2, PR#215 finding F1): the staged name provably
+		// stopped naming the validated download object — a directory writer
+		// rotated a substitute onto it inside the validation→install window.
+		// The substitute is FOREIGN bytes: never unlink it here (the create
+		// path published nothing; the replace path already restored its
+		// set-aside and retracted the journal through the publish-failure
+		// compensation). Dest is untouched on the create path; the retained
+		// staged name is warn-logged for manual cleanup.
+		if errors.Is(instErr, errStagedInputSubstituted) {
+			logging.Warnf("downloader: install of %s refused — staged name %s no longer names the validated download object (foreign substitution after validation); substitute preserved, destination untouched, manual cleanup advised", destPath, tempPath)
+			result.Error = instErr
+			result.Duration = time.Since(startTime)
+			return result, result.Error
+		}
+		// Wave-41 (codex P2, PR#215): an install error carrying
+		// fsutil.ErrPublishCompleted proves the destination WAS published with
+		// the staged bytes — the POSIX hard-link fallback's staged cleanup could
+		// not re-prove tempPath (fsutil.ErrPublishNoReplaceStagedUnverified: it
+		// may now address a FOREIGN occupant fsutil deliberately left
+		// byte-intact) or its unlink failed with the destination rollback
+		// failing too (wave-20). NEVER remove tempPath — unlinking there could
+		// destroy foreign bytes; the retained staged name is warn-logged for
+		// manual cleanup, matching copyBackupToDestPublish's wave-34 posture.
+		// Wave-68 (codex P2, PR#215 F2): the completed-with-identity leg (waves
+		// 61/62 — the ENOSYS-times-skipped publish hands back the post-publish-
+		// verified destination identity) files THAT record on producerIdentity
+		// and records exactly the success leg's accounting (dest enters
+		// CreatedPaths through Downloaded && !Replaced, so a later revert
+		// leaves the new media behind). If the identity is genuinely
+		// unavailable (virtual-fs posture, or ErrPublishCompleted without a
+		// dest info binding) the publish completed but its provenance CANNOT
+		// be certified — a foreign temp replacement would then ride
+		// publish-as-poster against an unknown record (downstream skips the
+		// producer gates). Refuse instead of continuing, matching wave-53's
+		// fail-closed posture: nothing certified, tempPath preserved
+		// byte-intact (possibly foreign), the completed error surfaces.
+		if fsutil.PublishCompleted(instErr) {
+			if installedID.known {
+				logging.Warnf("downloader: install of %s completed despite the returned error (%v) — staged name %s could not be re-proven (possibly foreign) and is left in place; manual cleanup advised", destPath, instErr, tempPath)
+				result.producerIdentity = installedID
+				result.Size = written
+				result.Downloaded = true
+				result.Replaced = replaced
+				result.Duration = time.Since(startTime)
+				return result, nil
+			}
+			logging.Warnf("downloader: install of %s completed despite the returned error (%v) but the published identity is unavailable (virtual-fs posture or no dest info binding) — refusing to certify an unproven publish; staged name %s left in place (possibly foreign), manual cleanup advised", destPath, instErr, tempPath)
+			result.Error = instErr
+			result.Duration = time.Since(startTime)
+			return result, result.Error
+		}
+		// Codex P2 (PR#215 finding, wave-62): install failed WITHOUT any
+		// publish — tempPath still names the validated object, or a foreign
+		// substitute swapped in after validation while our handle was open.
+		// Bind the cleanup to the identity snapshot exactly like the wave-59
+		// skipped leg; the closed provenance handle's identity is immutable.
+		if destStillHoldsInstalledObject(d.fs, tempPath, provenance.identity) {
+			_ = d.fs.Remove(tempPath)
+		} else if _, lerr := lstatBackupCandidate(d.fs, tempPath); !os.IsNotExist(lerr) {
+			logging.Warnf("downloader: failed install of %s left staged name %s in place — it no longer provably names the validated download (foreign substitution or indeterminate); preserved byte-intact for manual cleanup", destPath, tempPath)
+		}
+		result.Error = instErr
 		result.Duration = time.Since(startTime)
 		return result, result.Error
+	}
+	if skipped {
+		// Wave-59 (codex P2, PR#215 finding F2): bind the skipped-download
+		// cleanup to the staged object — installOverwriting published nothing
+		// on skip, so tempPath still holds the downloaded bytes OR a foreign
+		// substitute swapped in after validation (the provenance handle is
+		// already closed by installOverwriting's bound-publish ownership, so
+		// the validation-time identity snapshot — the handle's never-mutable
+		// fstat — binds the cleanup). Remove ONLY when tempPath still provably
+		// names the validated object; a foreign occupant is preserved
+		// byte-intact for manual cleanup, never destroyed by a pathname Remove.
+		if destStillHoldsInstalledObject(d.fs, tempPath, provenance.identity) {
+			_ = d.fs.Remove(tempPath)
+		} else if _, lerr := lstatBackupCandidate(d.fs, tempPath); !os.IsNotExist(lerr) {
+			logging.Warnf("downloader: skipped install of %s left staged name %s in place — it no longer provably names the validated download (foreign substitution or indeterminate); preserved byte-intact for manual cleanup", destPath, tempPath)
+		}
+		result.Skipped = true
+		result.Downloaded = false
+		result.LocalPath = destPath // the preserved existing artwork
+		result.Duration = time.Since(startTime)
+		return result, nil
 	}
 
 	result.Size = written
 	result.Downloaded = true
-	result.Replaced = existed
+	result.Replaced = replaced
+	result.producerIdentity = installedID
 	result.Duration = time.Since(startTime)
 
 	return result, nil
@@ -209,7 +325,22 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 // payload, while unknown binary bytes pass through untouched — so unusual
 // but real image/video encodings and fixture bytes are never rejected by
 // mistake.
-func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string) error {
+//
+// Wave-45 (codex P2, PR#215 finding F1): on acceptance the validated object's
+// FileInfo is handed back, captured FROM THE OPEN HANDLE the sniffer read —
+// the caller freezes it into the install provenance snapshot
+// (installedIdentityFromFileInfo) so a substitute rotated onto tempPath
+// between validation and install can never publish in the validated object's
+// place. A failed identity capture fails the validation closed.
+//
+// Wave-48 (codex P2, PR#215 finding 6): on acceptance the sniffer's read
+// handle itself is handed back OPEN alongside the identity record (returns
+// info, handle, nil) — the identity-bearing object rides into install through
+// the bound publish end to end (on filesystems where rename cannot span an
+// open descriptor, fsutil's bound publish closes it at publish adjacency and
+// re-proves the landed destination against the captured snapshot). Every
+// refusal closes the handle and returns none.
+func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string) (os.FileInfo, afero.File, error) {
 	ct := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 	// Any declared text/* type is provably not image/video payload —
 	// "text/plain" prose like "rate limit exceeded" must not reach
@@ -218,28 +349,40 @@ func validateDownloadedMedia(fs afero.Fs, tempPath, contentType, destPath string
 	if strings.HasPrefix(ct, "text/") || strings.HasPrefix(ct, "application/json") ||
 		strings.HasPrefix(ct, "application/xml") ||
 		strings.HasSuffix(ct, "+xml") {
-		return fmt.Errorf("downloaded %q instead of media for %s (likely an auth challenge or proxy error response)", ct, destPath)
+		return nil, nil, fmt.Errorf("downloaded %q instead of media for %s (likely an auth challenge or proxy error response)", ct, destPath)
 	}
 
 	f, err := fs.Open(tempPath)
 	if err != nil {
-		return fmt.Errorf("failed to read downloaded file: %w", err)
+		return nil, nil, fmt.Errorf("failed to read downloaded file: %w", err)
 	}
-	defer func() { _ = f.Close() }()
+
+	// Capture the validated object's identity THROUGH THE HANDLE before the
+	// sniff read: on OsFs this is fstat — dev/inode, size, and mtime of
+	// exactly the object being sniffed. InstallOverwriting's provenance gate
+	// compares the staged name against this snapshot, never against a later
+	// path re-lookup of the mutable temp name.
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("failed to stat downloaded file: %w", err)
+	}
 
 	head := make([]byte, 256)
 	n, err := f.Read(head)
 	if err != nil && !errors.Is(err, io.EOF) {
-		return fmt.Errorf("failed to read downloaded file: %w", err)
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("failed to read downloaded file: %w", err)
 	}
 	trimmed := strings.TrimSpace(strings.ToLower(string(head[:n])))
 	if strings.HasPrefix(trimmed, "<!doctype") || strings.HasPrefix(trimmed, "<html") ||
 		strings.HasPrefix(trimmed, "<head") || strings.HasPrefix(trimmed, "<?xml") ||
 		strings.HasPrefix(trimmed, "<error") || strings.HasPrefix(trimmed, "<response") ||
 		strings.HasPrefix(trimmed, "{") {
-		return fmt.Errorf("downloaded an HTML/JSON document instead of media for %s (likely an auth challenge or proxy error)", destPath)
+		_ = f.Close()
+		return nil, nil, fmt.Errorf("downloaded an HTML/JSON document instead of media for %s (likely an auth challenge or proxy error)", destPath)
 	}
-	return nil
+	return info, f, nil
 }
 
 func resolveDownloadOptions(options []any) (bool, *sync.Map) {
@@ -300,6 +443,34 @@ func uniqueTempPath(destPath, suffix string) string {
 	buf := make([]byte, 8)
 	_, _ = rand.Read(buf)
 	return destPath + "." + hex.EncodeToString(buf) + "." + suffix
+}
+
+// downloadTempClaimTries bounds the exclusive temp-name claim loop; every
+// collision (or racing claimant) costs one draw.
+const downloadTempClaimTries = 8
+
+// createDownloadTempFile claims the download's staging temp name with
+// O_CREATE|O_EXCL|O_WRONLY, redrawing on collision (POSTER-WRITE-HARDENING
+// wave-51): the pre-shape d.fs.Create opened the drawn name with O_TRUNC —
+// anything sitting at the fresh name (a stale temp shard reused by another
+// tool, a watcher pre-planting the namespace) was silently truncated before
+// any bytes were even fetched. The claim loop never truncates an occupant:
+// either the draw wins a provably-fresh name or the download fails and the
+// occupant keeps its bytes byte-intact.
+func createDownloadTempFile(fs afero.Fs, destPath string) (string, afero.File, error) {
+	for attempt := 0; attempt < downloadTempClaimTries; attempt++ {
+		tempPath := uniqueTempPath(destPath, "tmp")
+		outFile, err := fs.OpenFile(tempPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o666)
+		switch {
+		case err == nil:
+			return tempPath, outFile, nil
+		case os.IsExist(err):
+			continue // a racer (or a stale shard) owns this draw — draw again
+		default:
+			return "", nil, err
+		}
+	}
+	return "", nil, fmt.Errorf("download temp names exhausted for %s after %d attempts", destPath, downloadTempClaimTries)
 }
 
 // retryableOperation wraps an attempt function with retry logic for transient errors.

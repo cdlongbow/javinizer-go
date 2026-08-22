@@ -27,6 +27,31 @@ ignore:
   # not compile them, so they never appear in coverage.out; without this
   # ignore, adding an e2e test file fails the 80% patch gate on every PR.
   - "test/e2e/**"
+  # Custom-tagged platform stubs (non-_GOOS-suffixed //go:build !unix files).
+  # Compiled only on non-Unix hosts; no coverage-upload job can ever hit them,
+  # so their diff lines permanently failed the server-side patch gate (see the
+  # earlier e2e/desktop entries for precedent).
+  - "internal/history/restore_source_identity_other.go"
+  - "internal/history/restore_source_nofollow_other.go"
+  - "internal/downloader/restore_source_identity_other.go"
+  - "internal/downloader/restore_source_nofollow_other.go"
+  # //go:build windows companions to the stubs above — compiled only on
+  # Windows hosts, so no coverage-upload job ever hits them either.
+  - "internal/history/restore_source_nofollow_windows.go"
+  - "internal/downloader/restore_source_nofollow_windows.go"
+  # //go:build windows leg of the wave-30 publish-with-reverify helper
+  # (PublishStagedBound): MoveFileEx cannot rename an open Go handle, so the
+  # Windows leg keeps a prove-close-publish-reverify posture that compiles
+  # only on Windows — no ubuntu coverage-upload job ever hits those lines.
+  # The shared interface + POSIX recovery legs ARE fully covered
+  # (publish_staged_bound.go / publish_staged_bound_unix.go).
+  - "internal/fsutil/publish_staged_bound_windows.go"
+  # The non-Linux variants of the wave-38 bound take-aside kernel identity
+  # extractor (bound_take.go): //go:build windows (other) and darwin-family
+  # (narrow unix) files — the ubuntu coverage-upload job compiles only the
+  # posix variant.
+  - "internal/fsutil/bound_identity_narrow_unix.go"
+  - "internal/fsutil/bound_identity_other.go"
   # Desktop-only build-tagged file (//go:build desktop). The real Wails
   # runner pulls in per-platform webview headers and must not enter the
   # default build/test path; without this ignore, its new lines all count
@@ -40,6 +65,10 @@ ignore:
   - "web/**"
   # Vendored deps that ship Go files (e.g. flatted/golang).
   - "**/node_modules/**"
+  # mockery-generated mocks — regenerated wholesale on every interface
+  # change; their bodies have no testable behavior (CI's make check-mocks
+  # guards freshness instead).
+  - "internal/mocks/**"
 
 comment:
   layout: "reach,diff,flags,files"

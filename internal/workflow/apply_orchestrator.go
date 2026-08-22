@@ -203,7 +203,7 @@ func (o *applyOrchImpl) Execute(ctx context.Context, cmd ApplyCmd) (*ApplyResult
 		progressMsg:  "Downloading media...",
 		progressPct:  0.5,
 		progressStep: progress.ProgressStepDownload,
-		execute:      func() error { return o.stepDownload(ctx, cmd, state, &steps) },
+		execute:      func() error { return o.stepDownload(ctx, cmd, opID, state, &steps) },
 	}
 
 	// Step 5: Generate NFO.
@@ -365,7 +365,7 @@ func (o *applyOrchImpl) stepDisplayTitle(ctx context.Context, cmd ApplyCmd, stat
 }
 
 // stepDownload downloads cover, poster, trailer, and extrafanart media.
-func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, state *applyPipelineState, steps *stepCompletion) error {
+func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, opID OperationID, state *applyPipelineState, steps *stepCompletion) error {
 	downloadEnabled := cmd.Download && !cmd.DryRun
 	if !downloadEnabled || o.downloader == nil {
 		return nil
@@ -385,6 +385,15 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, state *a
 			downloadMovie = state.scrapedMediaURLs.overlay(downloadMovie)
 		}
 	}
+	// R7-3/R12-2: media install into the organizer's leaf folder — seed it
+	// as the discovery root pre-download; a DESTRUCTIVE run must never
+	// proceed with an unseeded discovery path (the startup sweep would be
+	// blind to a pre-journal crash window there).
+	if rl, ok := o.revertLog.(*dbRevertLog); ok && opID != "" && state.finalDir != "" {
+		if sErr := rl.seedRoot(ctx, opID, state.finalDir); sErr != nil && cmd.OverwriteExistingMedia {
+			return fmt.Errorf("discovery-root seed failed for overwrite run: %w", sErr)
+		}
+	}
 	outcome, dlErr := o.downloader.Download(ctx, downloader.DownloadCmd{
 		Movie:                  downloadMovie,
 		DestDir:                state.finalDir,
@@ -392,6 +401,8 @@ func (o *applyOrchImpl) stepDownload(ctx context.Context, cmd ApplyCmd, state *a
 		DownloadExtrafanart:    cmd.DownloadExtrafanart,
 		OverwriteExistingMedia: cmd.OverwriteExistingMedia,
 		Dedup:                  cmd.Dedup,
+		OperationID:            opID,
+		Recorder:               replacementRecorder(o.revertLog),
 	})
 	if dlErr != nil {
 		resolveLogger(o.logger).Warnf("[workflow] Download failed for %s: %v (continuing to NFO generation)", state.movie.ID, dlErr)
@@ -492,6 +503,16 @@ func (o *applyOrchImpl) completeRevertLogWithState(ctx context.Context, opID Ope
 // beginRevertLog starts a revert log entry before filesystem mutation.
 // Per CONTEXT.md: Begin must be called BEFORE any filesystem mutation.
 // Begin is a pure DB write; CaptureSnapshot reads NFO separately.
+// replacementRecorder arms the downloader's revert ledger only when the
+// operation rows are durably journalled — the no-op recorder would accept
+// replacements silently, so it must never arm a destructive overwrite.
+func replacementRecorder(rl RevertLog) downloader.ReplacementRecorder {
+	if _, ok := rl.(*dbRevertLog); !ok {
+		return nil
+	}
+	return rl
+}
+
 // Returns empty OperationID if revertLog is nil or Begin fails.
 func (o *applyOrchImpl) beginRevertLog(ctx context.Context, cmd ApplyCmd) OperationID {
 	if o.revertLog == nil {

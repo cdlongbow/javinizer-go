@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,6 +71,51 @@ type RevertLog interface {
 	// RevertStatusFailed. Use this when a later pipeline step fails after an
 	// earlier step has already mutated the filesystem.
 	CompleteFailed(ctx context.Context, opID OperationID, result *ApplyResult) error
+
+	// RecordReplacement implements the downloader's ReplacementRecorder seam
+	// (POSTER-WRITE-HARDENING P3): the pre-existing bytes at replacedPath have
+	// already been moved aside to backupPath under the downloader's
+	// per-destination lock; this journals the pair on the operation row BEFORE
+	// the new bytes install. Appends are serialized per operation row and each
+	// entry carries a restart-persistent per-destination sequence (assigned
+	// inside the downloader's destination lock, so call order is the true
+	// replace order). Complete/CompleteFailed merge these incremental entries
+	// into the final generated-files ledger.
+	// Wave-25 (codex P3 PR#215): the optional trailing backupFacts stamp the
+	// set-aside backup's size + mtime into the entry so history's removal gate
+	// can verify the object at backupPath is the OWNED set-aside before
+	// unlinking it (journal-append and stamp are one atomic write here).
+	RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string, backupFacts ...models.ReplacementBackupFacts) error
+
+	// ReleaseReplacement retracts a journal entry the downloader rolled back
+	// itself (record landed, install failed, backup restored over the
+	// destination). The row must not keep pointing at the consumed backup.
+	ReleaseReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
+
+	// MarkReplacementRestorePending disarms a journaled entry the downloader
+	// rolled back but whose backup re-arm was REFUSED with the occupied-name
+	// classes (fsutil.PublishRefusal): the backup name is foreign-occupied or
+	// absent, so leaving the entry armed would aim the next revert at bytes
+	// this operation does not own. The rollback already restored the
+	// destination, so the entry is marked RestorePending with the wave-19
+	// rearm-refused kind — certified destination, consumption retry without
+	// any backup-path operation (codex P2, PR#215 wave-19).
+	MarkReplacementRestorePending(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
+
+	// MarkReplacementRestorePendingKind is MarkReplacementRestorePending with
+	// an explicit restore-pending kind (wave-21, codex P2 PR#215): the
+	// downloader's rollback re-arm now disarms the journal entry for EVERY
+	// re-arm failure class, and the kind alone routes on backup-name
+	// ownership — models.RestorePendingKindRearmRefused for the unowned
+	// (foreign-occupied or absent) name, models.RestorePendingKindClean when
+	// the failed re-arm demonstrably published this operation's own bytes
+	// (the fsutil.PublishCompleted class). Unknown kinds are rejected, never
+	// persisted.
+	MarkReplacementRestorePendingKind(ctx context.Context, opID OperationID, replacedPath, backupPath, kind string) error
+
+	// ConfirmReplacement marks the journaled entry installed after the new
+	// bytes landed (P3 R4-3 crash-window marker).
+	ConfirmReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error
 }
 
 // RevertLogConfig holds the subset of configuration needed by dbRevertLog.
@@ -122,6 +168,29 @@ func (noOpRevertLog) Complete(_ context.Context, _ OperationID, _ *ApplyResult) 
 }
 
 func (noOpRevertLog) CompleteFailed(_ context.Context, _ OperationID, _ *ApplyResult) error {
+	return nil
+}
+
+func (noOpRevertLog) RecordReplacement(_ context.Context, _ OperationID, _, _ string, _ ...models.ReplacementBackupFacts) error {
+	// No durable store — journal nothing. Callers must not arm the downloader
+	// ledger with a no-op recorder: workflow threads the recorder only when the
+	// concrete RevertLog is the DB-backed implementation (see replacementRecorder).
+	return nil
+}
+
+func (noOpRevertLog) ReleaseReplacement(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (noOpRevertLog) MarkReplacementRestorePending(_ context.Context, _ OperationID, _, _ string) error {
+	return nil
+}
+
+func (noOpRevertLog) MarkReplacementRestorePendingKind(_ context.Context, _ OperationID, _, _, _ string) error {
+	return nil
+}
+
+func (noOpRevertLog) ConfirmReplacement(_ context.Context, _ OperationID, _, _ string) error {
 	return nil
 }
 
@@ -196,6 +265,52 @@ func newPreOrganizeRecord(batchJobID, movieID, originalPath, nfoSnapshot, nfoPat
 	}
 }
 
+// mergeReplacementLedger carries replacement entries journaled incrementally
+// by RecordReplacement into the freshly-built generated-files payload so
+// Complete/CompleteFailed never drop the revert-ledger's move-back journal.
+// newRaw == "" (no delete/move-back output) upgrades to a payload carrying
+// just the replacements; unparseable prior content degrades to newRaw.
+// appendLedgerRoot adds root to the ledger's seeded discovery roots (dedup).
+func appendLedgerRoot(raw, root string) string {
+	if raw == "" {
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Roots: []string{root}})
+	}
+	gf, err := models.ParseGeneratedFiles(raw)
+	if err != nil {
+		return raw
+	}
+	for _, r := range gf.Roots {
+		if r == root {
+			return raw
+		}
+	}
+	gf.Roots = append(gf.Roots, root)
+	data := models.MarshalLedgerJSON(gf)
+	return data
+}
+
+func mergeReplacementLedger(priorRaw, newRaw string) string {
+	if priorRaw == "" {
+		return newRaw
+	}
+	prior, err := models.ParseGeneratedFiles(priorRaw)
+	if err != nil || (len(prior.Replacements) == 0 && len(prior.Roots) == 0) {
+		return newRaw
+	}
+	if newRaw == "" {
+		return models.MarshalLedgerJSON(models.GeneratedFilesJSON{Replacements: prior.Replacements, Roots: prior.Roots})
+	}
+	fresh, err := models.ParseGeneratedFiles(newRaw)
+	if err != nil {
+		return newRaw
+	}
+	fresh.Replacements = prior.Replacements
+	if len(fresh.Roots) == 0 {
+		fresh.Roots = prior.Roots
+	}
+	return models.MarshalLedgerJSON(fresh)
+}
+
 func buildGeneratedFilesJSON(logger logging.Logger, nfoPath string, subtitleMoves []models.SubtitleMove, downloadPaths []string) string {
 	gf := models.GeneratedFilesJSON{}
 
@@ -243,6 +358,79 @@ func updatePostOrganize(op *models.BatchFileOperation, newPath string, inPlaceRe
 	op.GeneratedFiles = generatedFilesJSON
 }
 
+// completionLedgerMerge computes the completion-transaction journal: the apply
+// outcome's generated-files payload (newRaw) merges into the row's FRESH
+// in-transaction journal bytes (currentRaw) — replacement entries and seeded
+// discovery roots on the fresh row carry into the merged ledger — and the
+// organizer's leaf folder is appended as a discovery root (R4-2: media
+// actually lands there, so the sweeper's bounded recursion starts there).
+// persist=false reports an idempotent no-op (merged bytes identical to what
+// the row already carries, e.g. a retried completion).
+func completionLedgerMerge(currentRaw, newRaw, folderRoot string) (next models.GeneratedFilesJSON, persist bool, merged string, err error) {
+	merged = mergeReplacementLedger(currentRaw, newRaw)
+	if folderRoot != "" {
+		merged = appendLedgerRoot(merged, folderRoot)
+	}
+	if merged == currentRaw {
+		return models.GeneratedFilesJSON{}, false, merged, nil
+	}
+	gf, perr := models.ParseGeneratedFiles(merged)
+	if perr != nil {
+		// Unreachable through mergeReplacementLedger's byte contract (its output
+		// is always empty or marshaled JSON); refuse the transaction rather than
+		// persist a blob journal readers cannot parse.
+		return models.GeneratedFilesJSON{}, false, "", perr
+	}
+	return gf, true, merged, nil
+}
+
+// mergeJournalInTx persists a completion's journal contribution through the
+// serialized journal transaction (codex review 4960250562 follow-up, wave-9):
+// the merge runs against the row re-read INSIDE the BEGIN IMMEDIATE
+// transaction, never against the completion's stale preRecord snapshot, so a
+// concurrent process appending (RecordReplacement) or consuming (revert/sweep)
+// entries can no longer be overwritten by a full Save — resurrected consumed
+// entries and erased new entries both came from that snapshot merge. Only the
+// journal column moves through the transaction; the caller's follow-up
+// UpdateNonJournalFields persists ONLY the non-journal columns (wave-10: the
+// follow-up full Save used to re-persist the tx-derived bytes, which still
+// clobbered any journal mutation committed between the tx commit and the
+// Save), so generated_files is owned exclusively by UpdateJournalInTx.
+func (l *dbRevertLog) mergeJournalInTx(ctx context.Context, recordID uint, opID OperationID, caller, newRaw, folderRoot string) (string, error) {
+	var merged string
+	txErr := l.repo.UpdateJournalInTx(ctx, recordID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		next, persist, m, err := completionLedgerMerge(current.GeneratedFiles, newRaw, folderRoot)
+		merged = m
+		return next, persist, err
+	})
+	switch {
+	case errors.Is(txErr, database.ErrNotFound):
+		return "", fmt.Errorf("revert log %s: record %s not found", caller, opID)
+	case txErr != nil:
+		return "", fmt.Errorf("revert log %s: persist journal for record %s: %w", caller, opID, txErr)
+	}
+	return merged, nil
+}
+
+// persistNonJournalColumns is the wave-15 seam every completion-side
+// non-journal column publish routes through (POSTER-WRITE-HARDENING codex
+// P1): the repository reports database.ErrOperationRowReverted when a
+// concurrent writer reverted the row before this update's status columns
+// landed — the non-status columns committed while the stored reverted state
+// stays authoritative. The completion LOST the race: warn through the logger
+// seam, reflect the truth on the in-memory record so later readers never see
+// the reverted operation resurface as live, and report success — external
+// behavior is unchanged except that the reverted row is never clobbered.
+func (l *dbRevertLog) persistNonJournalColumns(ctx context.Context, opID OperationID, record *models.BatchFileOperation) error {
+	err := l.repo.UpdateNonJournalFields(ctx, record)
+	if errors.Is(err, database.ErrOperationRowReverted) {
+		resolveLogger(l.logger).Warnf("[revert-log] record %s was reverted concurrently with this completion; completion columns persisted, reverted status preserved", opID)
+		record.RevertStatus = models.RevertStatusReverted
+		return nil
+	}
+	return err
+}
+
 // ctx is accepted for future use when repository methods support context propagation
 // Begin is a pure database write — no filesystem I/O.
 func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, error) {
@@ -257,11 +445,19 @@ func (l *dbRevertLog) Begin(ctx context.Context, cmd ApplyCmd) (OperationID, err
 
 	// write the DB record without NFO snapshot.
 	// CaptureSnapshot will fill in the snapshot content separately.
+	// Seed the discovery root NOW, pre-mutation: the row must name where
+	// downloads will land even if the process dies before any journal entry
+	// exists (codex P3 R3-3 — the pre-journal crash window).
+	seed, _ := json.Marshal(models.GeneratedFilesJSON{Roots: []string{cmd.DestPath}})
+	if cmd.DestPath == "" {
+		seed = nil
+	}
 	preRecord := newPreOrganizeRecord(
 		l.jobID, cmd.Movie.ID, cmd.Match.Path,
 		"", "", sourceDir, // no snapshot yet
 		opType, false,
 	)
+	preRecord.GeneratedFiles = string(seed)
 	if err := l.repo.Create(ctx, preRecord); err != nil {
 		return "", fmt.Errorf("revert log Begin failed: %w", err)
 	}
@@ -337,7 +533,12 @@ func (l *dbRevertLog) CaptureSnapshot(ctx context.Context, opID OperationID, cmd
 		preRecord.OriginalDirPath = sourceDir
 	}
 
-	if updateErr := l.repo.Update(ctx, preRecord); updateErr != nil {
+	// Wave-10: non-journal columns only — the generated_files column is owned
+	// by UpdateJournalInTx, so a concurrent journal append between FindByID
+	// and this write must not be clobbered by a full Save of the snapshot.
+	// Wave-15: a concurrent revert committed first is tolerated (warned,
+	// never clobbered) inside persistNonJournalColumns.
+	if updateErr := l.persistNonJournalColumns(ctx, opID, preRecord); updateErr != nil {
 		resolveLogger(l.logger).Warnf("[revert-log] CaptureSnapshot: failed to update record %s: %v", opID, updateErr)
 	}
 }
@@ -355,6 +556,9 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	}
 	recordID := uint(recordID64)
 
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
 	preRecord, err := l.repo.FindByID(ctx, recordID)
 	if err != nil {
 		return fmt.Errorf("revert log Complete: find record %s: %w", opID, err)
@@ -366,7 +570,12 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 	if result == nil {
 		updatePostOrganize(preRecord, "", false, preRecord.OriginalDirPath, "")
 		preRecord.RevertStatus = models.RevertStatusFailed
-		if updateErr := l.repo.Update(ctx, preRecord); updateErr != nil {
+		// Wave-10: generated_files stays with UpdateJournalInTx even here — a
+		// full Save of this snapshot could erase a foreign journal append.
+		// Wave-15: a concurrent revert suppresses this Failed mark
+		// (persistNonJournalColumns warns + tolerates) instead of being
+		// clobbered by it.
+		if updateErr := l.persistNonJournalColumns(ctx, opID, preRecord); updateErr != nil {
 			return fmt.Errorf("revert log Complete: mark record %s as failed: %w", opID, updateErr)
 		}
 		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s — pre-record marked as incomplete", opID)
@@ -390,7 +599,21 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		}
 	}
 
-	generatedFilesJSON := buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths)
+	// Wave-9 (codex review 4960250562 follow-up): the journal read-modify-write
+	// runs inside the row transaction against the FRESH row — merging into the
+	// preRecord snapshot here let a concurrent append/consume be overwritten by
+	// the follow-up full Save. Wave-10 closes the residual window: the follow-up
+	// itself (UpdateNonJournalFields below) no longer writes generated_files at
+	// all, so an append/consume committed after this tx commit survives.
+	folderRoot := ""
+	if result.OrganizeResult != nil {
+		folderRoot = result.OrganizeResult.FolderPath
+	}
+	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "Complete",
+		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), folderRoot)
+	if err != nil {
+		return err
+	}
 
 	if result.FoundNFOPath != "" {
 		preRecord.NFOPath = result.FoundNFOPath
@@ -399,8 +622,8 @@ func (l *dbRevertLog) Complete(ctx context.Context, opID OperationID, result *Ap
 		preRecord.NFOPath = result.NFOPath
 	}
 
-	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, generatedFilesJSON)
-	if err := l.repo.Update(ctx, preRecord); err != nil {
+	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
+	if err := l.persistNonJournalColumns(ctx, opID, preRecord); err != nil {
 		return fmt.Errorf("revert log Complete: update post-apply record for %s: %w", opID, err)
 	}
 	return nil
@@ -421,6 +644,9 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	}
 	recordID := uint(recordID64)
 
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
 	preRecord, err := l.repo.FindByID(ctx, recordID)
 	if err != nil {
 		return fmt.Errorf("revert log CompleteFailed: find record %s: %w", opID, err)
@@ -432,7 +658,11 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 	if result == nil {
 		updatePostOrganize(preRecord, "", false, preRecord.OriginalDirPath, "")
 		preRecord.RevertStatus = models.RevertStatusFailed
-		if updateErr := l.repo.Update(ctx, preRecord); updateErr != nil {
+		// Wave-10: non-journal columns only (see Complete's nil-result path).
+		// Wave-15: a concurrent revert suppresses this Failed mark
+		// (persistNonJournalColumns warns + tolerates) instead of being
+		// clobbered by it.
+		if updateErr := l.persistNonJournalColumns(ctx, opID, preRecord); updateErr != nil {
 			return fmt.Errorf("revert log CompleteFailed: mark record %s as failed: %w", opID, updateErr)
 		}
 		resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s — pre-record marked as incomplete", opID)
@@ -455,20 +685,345 @@ func (l *dbRevertLog) CompleteFailed(ctx context.Context, opID OperationID, resu
 			sourceDir = result.OrganizeResult.OldDirectoryPath
 		}
 	}
-	generatedFilesJSON := buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths)
+	// Wave-9 (codex review 4960250562 follow-up): same journal-transaction
+	// routing as Complete — the merge must see the FRESH row, not the stale
+	// preRecord snapshot. Wave-10: the follow-up column update below excludes
+	// generated_files entirely, so a journal mutation committed after this tx
+	// is no longer clobbered by the re-persist (UpdateJournalInTx owns that
+	// column exclusively).
+	mergedJournal, err := l.mergeJournalInTx(ctx, recordID, opID, "CompleteFailed",
+		buildGeneratedFilesJSON(resolveLogger(l.logger), result.NFOPath, subtitles, result.DownloadPaths), "")
+	if err != nil {
+		return err
+	}
+
 	if result.FoundNFOPath != "" {
 		preRecord.NFOPath = result.FoundNFOPath
 	}
 	if result.NFOPath != "" && preRecord.NFOPath == "" {
 		preRecord.NFOPath = result.NFOPath
 	}
-	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, generatedFilesJSON)
+	updatePostOrganize(preRecord, newPath, inPlaceRenamed, sourceDir, mergedJournal)
 	preRecord.RevertStatus = models.RevertStatusFailed
-	if err := l.repo.Update(ctx, preRecord); err != nil {
+	if err := l.persistNonJournalColumns(ctx, opID, preRecord); err != nil {
 		return fmt.Errorf("revert log CompleteFailed: update failed record for %s: %w", opID, err)
 	}
 	resolveLogger(l.logger).Warnf("[revert-log] Apply failed for %s after filesystem mutation — record kept revertable (NewPath=%q)", opID, newPath)
 	return nil
+}
+
+// replacementLedgerLocks serializes read-modify-writes per operation row
+// across every ledger mutation (record/release/confirm/seed/complete) and
+// the sweeper's consumption — ALL parties hold the SAME process registry
+// (codex P3 R15-1).
+var replacementLedgerLocks = fsutil.SharedJournalLocks()
+
+// RecordReplacement journals one replaced byte pair onto the operation row.
+// The caller (downloader installOverwriting) already holds the
+// per-destination lock and has moved the pre-existing bytes aside — the
+// per-destination sequence assigned here is therefore the true replace order
+// within this process; the sequence floor is read back from the database so
+// it stays monotonic across restarts.
+func (l *dbRevertLog) RecordReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string, backupFacts ...models.ReplacementBackupFacts) error {
+	if opID == "" {
+		return fmt.Errorf("revert log RecordReplacement: empty operation ID")
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log RecordReplacement: unparsable operation ID %q", opID)
+	}
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	// The sequence floor is computed OUTSIDE the row transaction: per-destination
+	// .dlbusy markers already exclude any cross-process armer of THIS
+	// destination, and the floor depends only on other rows for the same
+	// destination — a concurrent foreign-destination append to this row cannot
+	// shift it.
+	seq, err := nextDestSequence(ctx, l.repo, replacedPath)
+	if err != nil {
+		return fmt.Errorf("revert log RecordReplacement: sequence for %s: %w", replacedPath, err)
+	}
+
+	// Review 4960250562: the append merges against the row re-read INSIDE a
+	// BEGIN IMMEDIATE transaction, so a revert/sweep consuming a different
+	// destination of this row in another process can no longer be resurrected
+	// by a stale snapshot here (nor clobber this arm).
+	var fnErr error
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		// Legacy tolerance: rows written before the journal existed (or with no
+		// ledger at all) start from the zero value; malformed content still
+		// refuses rather than silently dropping the persisted ledger.
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			fnErr = fmt.Errorf("revert log RecordReplacement: parse ledger for record %s: %w", opID, perr)
+			return models.GeneratedFilesJSON{}, false, fnErr
+		}
+		// Wave-25: stamp the set-aside backup's identity facts into the same
+		// journal write — the removal gate (history removeReplacementBackup)
+		// later binds its unlink to these facts, so an unstamped entry reads as
+		// legacy while a stamped entry can only ever name the OWNED object.
+		var facts models.ReplacementBackupFacts
+		if len(backupFacts) > 0 {
+			facts = backupFacts[0]
+		}
+		gf.Replacements = append(gf.Replacements, models.ReplacementEntry{
+			Destination:   replacedPath,
+			Backup:        backupPath,
+			DestSeq:       seq,
+			BackupSize:    facts.Size,
+			BackupModUnix: facts.ModUnix,
+			BackupSHA256:  facts.SHA256,
+		})
+		return gf, true, nil
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log RecordReplacement: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log RecordReplacement: persist record %s: %w", opID, txErr)
+	}
+	return nil
+}
+
+// ReleaseReplacement removes the journaled entry for a backup the downloader
+// rolled back onto its destination. Missing entries are tolerated (idempotent
+// rollback); a missing row is not.
+func (l *dbRevertLog) ReleaseReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	if opID == "" {
+		return fmt.Errorf("revert log ReleaseReplacement: empty operation ID")
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log ReleaseReplacement: unparsable operation ID %q", opID)
+	}
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	var fnErr error
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			fnErr = fmt.Errorf("revert log ReleaseReplacement: parse ledger for record %s: %w", opID, perr)
+			return models.GeneratedFilesJSON{}, false, fnErr
+		}
+		kept := gf.Replacements[:0]
+		for _, e := range gf.Replacements {
+			if e.Destination == replacedPath && e.Backup == backupPath {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		if len(kept) == len(gf.Replacements) {
+			return gf, false, nil // entry already gone (e.g. sweep consumed it) — idempotent
+		}
+		gf.Replacements = kept
+		return gf, true, nil
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log ReleaseReplacement: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log ReleaseReplacement: persist record %s: %w", opID, txErr)
+	}
+	return nil
+}
+
+// MarkReplacementRestorePending durably marks the matching journal entry
+// restore-pending with the wave-19 rearm-refused kind (codex P2 PR#215): the
+// downloader's rollback already restored the destination bytes but the
+// backup re-arm was REFUSED with the occupied-name classes
+// (fsutil.PublishRefusal) — the name is foreign-occupied or absent. The
+// marker certifies the destination and keeps every retry off the unowned
+// name. The kind-carrying generalization lives in
+// MarkReplacementRestorePendingKind; this is the wave-19 shorthand it
+// delegates to.
+func (l *dbRevertLog) MarkReplacementRestorePending(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	return l.MarkReplacementRestorePendingKind(ctx, opID, replacedPath, backupPath, models.RestorePendingKindRearmRefused)
+}
+
+// MarkReplacementRestorePendingKind is MarkReplacementRestorePending with an
+// explicit restore-pending kind (wave-21, codex P2 PR#215). The downloader's
+// rollback re-arm disarms the journaled entry for EVERY failure class, with
+// the kind routing the retry: models.RestorePendingKindRearmRefused for an
+// unowned (foreign-occupied or absent) backup name — retries consume
+// journal-only — and models.RestorePendingKindClean when the failed re-arm
+// demonstrably published this operation's own bytes at the name (the
+// fsutil.PublishCompleted class — retries reap it first). Matching follows
+// the downloader seam's exact-spelling convention (same as
+// Record/Release/ConfirmReplacement); a missing entry is tolerated
+// (idempotent, exactly like ReleaseReplacement), a missing row is not. The
+// merge discipline (one-way upgrade, never a downgrade to clean) lives in
+// models.ReplacementEntry.SetRestorePending. Any other kind is rejected:
+// this build must never persist a marker whose routing it cannot interpret.
+func (l *dbRevertLog) MarkReplacementRestorePendingKind(ctx context.Context, opID OperationID, replacedPath, backupPath, kind string) error {
+	if opID == "" {
+		return fmt.Errorf("revert log MarkReplacementRestorePending: empty operation ID")
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log MarkReplacementRestorePending: unparsable operation ID %q", opID)
+	}
+	switch kind {
+	case models.RestorePendingKindClean, models.RestorePendingKindRearmRefused:
+	default:
+		return fmt.Errorf("revert log MarkReplacementRestorePending: unknown restore-pending kind %q", kind)
+	}
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	var fnErr error
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			fnErr = fmt.Errorf("revert log MarkReplacementRestorePending: parse ledger for record %s: %w", opID, perr)
+			return models.GeneratedFilesJSON{}, false, fnErr
+		}
+		for i := range gf.Replacements {
+			e := &gf.Replacements[i]
+			if e.Destination == replacedPath && e.Backup == backupPath {
+				if !e.SetRestorePending(kind) {
+					return gf, false, nil // already carries the mark at this kind — idempotent
+				}
+				return gf, true, nil
+			}
+		}
+		return gf, false, nil // entry already gone (e.g. consumed meanwhile) — idempotent
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log MarkReplacementRestorePending: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log MarkReplacementRestorePending: persist record %s: %w", opID, txErr)
+	}
+	return nil
+}
+
+// ConfirmReplacement flips the matching journal entry to installed.
+func (l *dbRevertLog) ConfirmReplacement(ctx context.Context, opID OperationID, replacedPath, backupPath string) error {
+	if opID == "" {
+		return fmt.Errorf("revert log ConfirmReplacement: empty operation ID")
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return fmt.Errorf("revert log ConfirmReplacement: unparsable operation ID %q", opID)
+	}
+
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+
+	var fnErr error
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			fnErr = fmt.Errorf("revert log ConfirmReplacement: parse ledger for record %s: %w", opID, perr)
+			return models.GeneratedFilesJSON{}, false, fnErr
+		}
+		changed := false
+		for i := range gf.Replacements {
+			e := &gf.Replacements[i]
+			if e.Destination == replacedPath && e.Backup == backupPath && !e.Installed {
+				e.Installed = true
+				changed = true
+			}
+		}
+		if !changed {
+			return gf, false, nil // entry already confirmed or retracted — idempotent
+		}
+		return gf, true, nil
+	})
+	switch {
+	case fnErr != nil:
+		return fnErr
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log ConfirmReplacement: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log ConfirmReplacement: persist record %s: %w", opID, txErr)
+	}
+	return nil
+}
+
+// seedRoot appends a discovery root to the operation ledger (dedup). R12-2:
+// failures SURFACE (silent log-and-proceed would arm a destructive download
+// whose pre-journal crash window the startup sweep cannot discover). Used
+// by the orchestrator right after organize: media land in the organizer's
+// leaf folder — possibly nested beyond the sweeper's walk bound (codex P3
+// R7-3) — so the exact folder is recorded while the run is still alive,
+// closing the pre-Complete discovery gap entirely.
+func (l *dbRevertLog) seedRoot(ctx context.Context, opID OperationID, root string) error {
+	if opID == "" || root == "" {
+		return nil
+	}
+	recordID64, err := strconv.ParseUint(opID, 10, 64)
+	if err != nil || recordID64 == 0 {
+		return nil
+	}
+	release := replacementLedgerLocks.Acquire(opID)
+	defer release()
+	// Review 4960250562: root seeding rides the same transaction as every other
+	// journal mutation. appendLedgerRoot's tolerances are preserved in struct
+	// form: a malformed body is left byte-identical (no write), an existing root
+	// dedups to a no-op, otherwise the re-marshaled ledger carries the new root.
+	txErr := l.repo.UpdateJournalInTx(ctx, uint(recordID64), func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, perr := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if perr != nil {
+			// Deliberate tolerance (Review 4960250562 note above): a malformed
+			// ledger body is left byte-identical and seeding dedups to a no-op
+			// rather than failing the journal transaction.
+			//nolint:nilerr // intentional: malformed ledgers skip the write instead of failing seedRoot.
+			return models.GeneratedFilesJSON{}, false, nil
+		}
+		for _, r := range gf.Roots {
+			if r == root {
+				return gf, false, nil
+			}
+		}
+		gf.Roots = append(gf.Roots, root)
+		return gf, true, nil
+	})
+	switch {
+	case errors.Is(txErr, database.ErrNotFound):
+		return fmt.Errorf("revert log seedRoot: record %s not found", opID)
+	case txErr != nil:
+		return fmt.Errorf("revert log seedRoot: persist root %s for %s: %w", root, opID, txErr)
+	}
+	return nil
+}
+
+// nextDestSequence returns the next per-destination sequence: the maximum
+// DestSeq already journaled for this destination across ALL operations
+// (applied and failed rows both count — a failed record's backups are still
+// restorable), plus one. Restart-persistent because it derives from rows.
+// Audit: this workflow grouping follows fsutil's platform separator seam;
+// POSIX journals use `/` spellings and keep literal backslashes distinct,
+// while Windows legacy slash/backslash spellings remain one destination.
+func nextDestSequence(ctx context.Context, repo database.BatchFileOperationRepositoryInterface, destination string) (int64, error) {
+	rows, err := repo.FindOperationsByDestination(ctx, destination)
+	if err != nil {
+		return 0, err
+	}
+	var maxSeq int64
+	for i := range rows {
+		gf, err := models.ParseGeneratedFiles(rows[i].GeneratedFiles)
+		if err != nil {
+			continue // unparsable rows contribute no sequence floor
+		}
+		for _, rep := range gf.Replacements {
+			if fsutil.DestKey(rep.Destination) == fsutil.DestKey(destination) && rep.DestSeq > maxSeq {
+				maxSeq = rep.DestSeq
+			}
+		}
+	}
+	return maxSeq + 1, nil
 }
 
 // NewRevertLogFromConfig creates the appropriate RevertLog based on config.
