@@ -23,9 +23,12 @@ import (
 	"github.com/spf13/afero"
 )
 
+const imageAcceptHeader = "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
+
 func (d *Downloader) download(ctx context.Context, url, destPath string, mediaType MediaType, options ...any) (finalResult *DownloadResult, finalErr error) {
 	startTime := time.Now()
 	overwriteExisting, dedup := resolveDownloadOptions(options)
+	owner := resolveDownloadOwnerOptions(options)
 
 	result := &DownloadResult{
 		URL:        url,
@@ -38,7 +41,7 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 	if overwriteExisting {
 		var skipped bool
 		var reservationErr error
-		reservation, skipped, reservationErr = acquireDownloadReservation(ctx, dedup, destPath)
+		reservation, skipped, reservationErr = acquireDownloadReservation(ctx, dedup, destPath, owner.logicalKey, owner.ownerKey)
 		if reservationErr != nil {
 			result.Error = reservationErr
 			result.Duration = time.Since(startTime)
@@ -105,6 +108,13 @@ func (d *Downloader) download(ctx context.Context, url, destPath string, mediaTy
 
 	if d.config.UserAgent != "" {
 		req.Header.Set("User-Agent", d.config.UserAgent)
+	}
+	switch mediaType {
+	case MediaTypeCover, MediaTypePoster, MediaTypeExtrafanart, MediaTypeActress:
+		// Keep apply-time image representation negotiation aligned with the
+		// review poster fetch. A content-negotiating host must return the same
+		// bytes for the later fingerprint comparison to be meaningful.
+		req.Header.Set("Accept", imageAcceptHeader)
 	}
 	if referer := resolveDownloadReferer(url); referer != "" {
 		req.Header.Set("Referer", referer)
@@ -399,17 +409,128 @@ func resolveDownloadOptions(options []any) (bool, *sync.Map) {
 	return overwriteExisting, dedup
 }
 
+// downloadOwnerOptions carries the apply phase's deterministic owner claim
+// into the poster reservation. Empty values retain the legacy first-arrival
+// reservation behavior for direct downloader callers.
+type downloadOwnerOptions struct {
+	logicalKey string
+	ownerKey   string
+}
+
+func resolveDownloadOwnerOptions(options []any) downloadOwnerOptions {
+	for _, option := range options {
+		if owner, ok := option.(downloadOwnerOptions); ok {
+			return owner
+		}
+	}
+	return downloadOwnerOptions{}
+}
+
+const downloadOwnerClaimPrefix = "\x00poster-owner:"
+
+// downloadOwnerClaim is primed before apply fan-out. The owner binds the
+// concrete destination when it starts; workers for a different destination
+// under the same logical movie key do not get incorrectly skipped.
+type downloadOwnerClaim struct {
+	logicalKey string
+	ownerKey   string
+	done       chan struct{}
+	mu         sync.Mutex
+	destPath   string
+	success    bool
+}
+
+func ownerClaimKey(logicalKey string) string {
+	return downloadOwnerClaimPrefix + strings.ToLower(strings.TrimSpace(logicalKey))
+}
+
+// PrimeDownloadOwners registers one deterministic owner per logical key. It
+// is safe to call with an existing map and never overwrites a prior claim.
+func PrimeDownloadOwners(dedup *sync.Map, owners map[string]string) {
+	if dedup == nil {
+		return
+	}
+	for logicalKey, ownerKey := range owners {
+		logicalKey = strings.ToLower(strings.TrimSpace(logicalKey))
+		ownerKey = strings.TrimSpace(ownerKey)
+		if logicalKey == "" || ownerKey == "" {
+			continue
+		}
+		dedup.LoadOrStore(ownerClaimKey(logicalKey), &downloadOwnerClaim{
+			logicalKey: logicalKey,
+			ownerKey:   ownerKey,
+			done:       make(chan struct{}),
+		})
+	}
+}
+
+func (c *downloadOwnerClaim) bindDestination(path string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.destPath == "" {
+		c.destPath = path
+		return true
+	}
+	return c.destPath == path
+}
+
+func (c *downloadOwnerClaim) outcome() (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.destPath, c.success
+}
+
+func (c *downloadOwnerClaim) complete(success bool) {
+	c.mu.Lock()
+	c.success = success
+	c.mu.Unlock()
+	close(c.done)
+}
+
 type downloadReservation struct {
 	done    chan struct{}
 	success bool
+	claim   *downloadOwnerClaim
 }
 
-func acquireDownloadReservation(ctx context.Context, dedup *sync.Map, destPath string) (*downloadReservation, bool, error) {
+// acquireDownloadReservation accepts optional logicalKey, ownerKey arguments
+// so the pre-registered owner gets the first reservation even when worker
+// scheduling is arbitrary. Existing direct callers may omit them.
+func acquireDownloadReservation(ctx context.Context, dedup *sync.Map, destPath string, ownerArgs ...string) (*downloadReservation, bool, error) {
 	if dedup == nil {
 		return nil, false, nil
 	}
+	logicalKey, ownerKey := "", ""
+	if len(ownerArgs) > 0 {
+		logicalKey = strings.ToLower(strings.TrimSpace(ownerArgs[0]))
+	}
+	if len(ownerArgs) > 1 {
+		ownerKey = strings.TrimSpace(ownerArgs[1])
+	}
+	claimKey := ownerClaimKey(logicalKey)
 	for {
-		value, loaded := dedup.LoadOrStore(destPath, &downloadReservation{done: make(chan struct{})})
+		var claim *downloadOwnerClaim
+		if logicalKey != "" && ownerKey != "" {
+			if value, ok := dedup.Load(claimKey); ok {
+				claim, _ = value.(*downloadOwnerClaim)
+				if claim != nil && claim.ownerKey != ownerKey {
+					select {
+					case <-claim.done:
+						dest, success := claim.outcome()
+						if success && dest == destPath {
+							return nil, true, nil
+						}
+						continue
+					case <-ctx.Done():
+						return nil, false, ctx.Err()
+					}
+				}
+				if claim != nil && !claim.bindDestination(destPath) {
+					claim = nil
+				}
+			}
+		}
+		value, loaded := dedup.LoadOrStore(destPath, &downloadReservation{done: make(chan struct{}), claim: claim})
 		if !loaded {
 			return value.(*downloadReservation), false, nil
 		}
@@ -436,7 +557,39 @@ func finishDownloadReservation(dedup *sync.Map, destPath string, reservation *do
 	if !success {
 		dedup.Delete(destPath)
 	}
+	if reservation.claim != nil {
+		reservation.claim.complete(success)
+		claimKey := ownerClaimKey(reservation.claim.logicalKey)
+		if current, ok := dedup.Load(claimKey); ok && current == reservation.claim {
+			dedup.Delete(claimKey)
+		}
+	}
 	close(reservation.done)
+}
+
+// releaseDownloadOwnerClaim unblocks the next sibling when the primed owner
+// has no poster work (for example, no source URL or overwrite disabled).
+func releaseDownloadOwnerClaim(dedup *sync.Map, logicalKey, ownerKey string) {
+	if dedup == nil || strings.TrimSpace(logicalKey) == "" || strings.TrimSpace(ownerKey) == "" {
+		return
+	}
+	key := ownerClaimKey(logicalKey)
+	value, ok := dedup.Load(key)
+	claim, claimOK := value.(*downloadOwnerClaim)
+	if !ok || !claimOK || claim.ownerKey != strings.TrimSpace(ownerKey) {
+		return
+	}
+	claim.complete(false)
+	if current, exists := dedup.Load(key); exists && current == claim {
+		dedup.Delete(key)
+	}
+}
+
+// ReleaseDownloadOwnerClaim releases a primed poster owner when the complete
+// apply item exits before the poster reservation can do so (for example after
+// a pre-apply skip, organize failure, or recovered panic).
+func ReleaseDownloadOwnerClaim(dedup *sync.Map, logicalKey, ownerKey string) {
+	releaseDownloadOwnerClaim(dedup, logicalKey, ownerKey)
 }
 
 func uniqueTempPath(destPath, suffix string) string {

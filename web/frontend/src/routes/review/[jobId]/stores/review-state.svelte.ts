@@ -2,7 +2,11 @@ import { onDestroy, onMount, untrack } from 'svelte';
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
-import { VIEW_URL_PARAM, viewModeToUrlParam as sharedViewModeToUrlParam, type ReviewViewMode } from '$lib/utils/review-tab-sync';
+import {
+	VIEW_URL_PARAM,
+	viewModeToUrlParam as sharedViewModeToUrlParam,
+	type ReviewViewMode,
+} from '$lib/utils/review-tab-sync';
 import type { Page } from '@sveltejs/kit';
 import { createQuery, useQueryClient } from '@tanstack/svelte-query';
 import { apiClient } from '$lib/api/client';
@@ -86,37 +90,41 @@ export function hydrateReviewApplyControls(job: BatchJobResponse): ReviewApplyCo
 		overwriteExistingMedia: plan?.media_policy === 'replace',
 		applyPreset: plan?.merge?.source_preset,
 		applyScalarStrategy: plan?.merge?.scalar_strategy ?? 'prefer-nfo',
-		applyArrayStrategy: plan?.merge?.array_strategy ?? 'merge'
+		applyArrayStrategy: plan?.merge?.array_strategy ?? 'merge',
 	};
 }
 
-export function shouldHydrateReviewApplyControls(hydratedJobId: string | null, job: BatchJobResponse, routeJobId: string): boolean {
+export function shouldHydrateReviewApplyControls(
+	hydratedJobId: string | null,
+	job: BatchJobResponse,
+	routeJobId: string,
+): boolean {
 	return job.id === routeJobId && hydratedJobId !== job.id;
 }
 
 export function withCustomReviewMergeStrategy(
 	state: ReviewApplyControlState,
-	change: { scalar?: ScalarMergeStrategy; array?: ArrayMergeStrategy }
+	change: { scalar?: ScalarMergeStrategy; array?: ArrayMergeStrategy },
 ): ReviewApplyControlState {
 	return {
 		...state,
 		applyScalarStrategy: change.scalar ?? state.applyScalarStrategy,
 		applyArrayStrategy: change.array ?? state.applyArrayStrategy,
-		applyPreset: undefined
+		applyPreset: undefined,
 	};
 }
 
 export function buildReviewApplyOverrides(
 	state: ReviewApplyControlState,
 	isUpdateMode: boolean,
-	operationMode: ReviewApplyOverrides['operation_mode']
+	operationMode: ReviewApplyOverrides['operation_mode'],
 ): ReviewApplyOverrides {
 	const overrides: ReviewApplyOverrides = {
 		operation_mode: operationMode,
 		destination: state.destinationPath,
 		skip_nfo: state.skipNfo,
 		skip_download: state.skipDownload,
-		overwrite_existing_media: state.overwriteExistingMedia
+		overwrite_existing_media: state.overwriteExistingMedia,
 	};
 	if (isUpdateMode) {
 		overrides.preset = state.applyPreset;
@@ -135,7 +143,7 @@ export function createReviewState(pageStore: Page) {
 	const jobQuery = createQuery(() => ({
 		queryKey: ['batch-job', jobId],
 		queryFn: () => apiClient.getBatchJob(jobId, true),
-		placeholderData: (prev) => prev?.id === jobId ? prev : undefined,
+		placeholderData: (prev) => (prev?.id === jobId ? prev : undefined),
 	}));
 
 	let job = $state<BatchJobResponse | null>(null);
@@ -230,7 +238,9 @@ export function createReviewState(pageStore: Page) {
 	let applyPreset = $state<'conservative' | 'gap-fill' | 'aggressive' | undefined>(undefined);
 	let hydratedApplyPlanJobId: string | null = null;
 	let activeApplyJobId: string | null = null;
-	let applyInvalid = $derived((isUpdateMode || getEffectiveOperationMode() === 'metadata-artwork') && skipNfo && skipDownload);
+	let applyInvalid = $derived(
+		(isUpdateMode || getEffectiveOperationMode() === 'metadata-artwork') && skipNfo && skipDownload,
+	);
 
 	let showImagePanelContent = $state(true);
 	let showAllPreviewScreenshots = $state(false);
@@ -271,7 +281,8 @@ export function createReviewState(pageStore: Page) {
 
 	$effect(() => {
 		const jobData = jobQuery.data;
-		if (!jobData || !shouldHydrateReviewApplyControls(hydratedApplyPlanJobId, jobData, jobId)) return;
+		if (!jobData || !shouldHydrateReviewApplyControls(hydratedApplyPlanJobId, jobData, jobId))
+			return;
 		untrack(() => {
 			const controls = hydrateReviewApplyControls(jobData);
 			destinationPath = controls.destinationPath;
@@ -462,59 +473,59 @@ export function createReviewState(pageStore: Page) {
 		// reuse a stale preview. queryFn captures the same value as the key.
 		const operationMode = getEffectiveOperationMode();
 		return {
-		queryKey: [
-			'organize-preview',
-			jobId,
-			currentResult?.result_id,
-			currentMovie?.id,
-			operationMode,
-			destinationPath,
-			organizeOperation,
-			skipNfo,
-			skipDownload,
-			overwriteExistingMedia,
-			forceOverwrite,
-			preserveNfo,
-			applyPreset,
-			applyScalarStrategy,
-			applyArrayStrategy,
-			editedMovieKey,
-		],
-		queryFn: () => {
-			const copyOnly = organizeOperation !== 'move';
-			const linkMode =
-				organizeOperation === 'hardlink'
-					? 'hard'
-					: organizeOperation === 'softlink'
-						? 'soft'
-						: undefined;
+			queryKey: [
+				'organize-preview',
+				jobId,
+				currentResult?.result_id,
+				currentMovie?.id,
+				operationMode,
+				destinationPath,
+				organizeOperation,
+				skipNfo,
+				skipDownload,
+				overwriteExistingMedia,
+				forceOverwrite,
+				preserveNfo,
+				applyPreset,
+				applyScalarStrategy,
+				applyArrayStrategy,
+				editedMovieKey,
+			],
+			queryFn: () => {
+				const copyOnly = organizeOperation !== 'move';
+				const linkMode =
+					organizeOperation === 'hardlink'
+						? 'hard'
+						: organizeOperation === 'softlink'
+							? 'soft'
+							: undefined;
 
-			const fp = currentResult?.file_path ?? '';
-			const isEdited = editedMovies.has(fp);
-			let movieOverride: Movie | undefined;
-			if (isEdited) {
-				movieOverride = buildMovieOverride(editedMovies.get(fp));
-			}
+				const fp = currentResult?.file_path ?? '';
+				const isEdited = editedMovies.has(fp);
+				let movieOverride: Movie | undefined;
+				if (isEdited) {
+					movieOverride = buildMovieOverride(editedMovies.get(fp));
+				}
 
-			return apiClient.previewOrganize(jobId, currentResult!.result_id, {
-				destination: destinationPath,
-				copy_only: copyOnly,
-				link_mode: linkMode,
-				operation_mode: operationMode as
-					| 'organize'
-					| 'in-place'
-					| 'in-place-norenamefolder'
-					| 'metadata-artwork'
-					| 'preview',
-				skip_nfo: skipNfo,
-				skip_download: skipDownload,
-				overrides: buildReviewOverrides(),
-				movie: movieOverride,
-			});
-		},
-		enabled: previewEnabled,
-		staleTime: 300,
-	};
+				return apiClient.previewOrganize(jobId, currentResult!.result_id, {
+					destination: destinationPath,
+					copy_only: copyOnly,
+					link_mode: linkMode,
+					operation_mode: operationMode as
+						| 'organize'
+						| 'in-place'
+						| 'in-place-norenamefolder'
+						| 'metadata-artwork'
+						| 'preview',
+					skip_nfo: skipNfo,
+					skip_download: skipDownload,
+					overrides: buildReviewOverrides(),
+					movie: movieOverride,
+				});
+			},
+			enabled: previewEnabled,
+			staleTime: 300,
+		};
 	});
 
 	let preview = $derived(previewQuery.data ?? null);
@@ -559,12 +570,18 @@ export function createReviewState(pageStore: Page) {
 			apiClient.excludeBatchMovie(mutationJobId, resultId),
 		updateBatchMovie: (mutationJobId, resultId, movie, expectedResultRevision) =>
 			apiClient.updateBatchMovie(mutationJobId, resultId, movie, expectedResultRevision),
-		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight) =>
+		updateBatchMoviePosterCrop: (mutationJobId, resultId, crop, maxPosterHeight, identity) =>
 			apiClient.updateBatchMoviePosterCrop(mutationJobId, resultId, {
 				...crop,
 				// Omit max_poster_height when null OR undefined so a nullable crop
 				// height is never serialized as `max_poster_height: null`.
 				...(maxPosterHeight != null ? { max_poster_height: maxPosterHeight } : {}),
+				...(identity
+					? {
+							expected_poster_revision: identity.revision,
+							expected_poster_fingerprint: identity.fingerprint,
+						}
+					: {}),
 			}),
 		batchExcludeMovies: (mutationJobId, request) =>
 			apiClient.batchExcludeMovies(mutationJobId, request),
@@ -853,16 +870,22 @@ export function createReviewState(pageStore: Page) {
 			// sibling's pending edit can out-race this part's save and restore
 			// the geometry that was just cleared.
 			if (job) {
-				for (const fp of siblingResultFilePaths(job.results as Record<string, FileResult>, currentResult!.result_id)) {
+				for (const fp of siblingResultFilePaths(
+					job.results as Record<string, FileResult>,
+					currentResult!.result_id,
+				)) {
 					if (fp === currentResult!.file_path) continue;
 					const sibling = editedMovies.get(fp);
 					if (sibling) {
-						editedMovies.set(fp, clearCropGeometry({
-							...sibling,
-							poster_url: original.poster_url,
-							cropped_poster_url: original.cropped_poster_url,
-							should_crop_poster: original.should_crop_poster,
-						}));
+						editedMovies.set(
+							fp,
+							clearCropGeometry({
+								...sibling,
+								poster_url: original.poster_url,
+								cropped_poster_url: original.cropped_poster_url,
+								should_crop_poster: original.should_crop_poster,
+							}),
+						);
 					}
 				}
 			}
@@ -1066,11 +1089,44 @@ export function createReviewState(pageStore: Page) {
 			cropDragState = state;
 		},
 		getPosterCropStates: () => posterCropStates,
-		applyPosterFromUrlAsync: (resultId, url) => mutations.applyPosterFromUrlAsync(resultId, url),
-		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg) => {
-			return mutations.applyPosterCropAsync(mutationJobId, resultId, crop, maxPosterHeightArg);
+		prepareCropAsset: async (sourceURL) => {
+			const response = await fetch(sourceURL, {
+				method: 'GET',
+				credentials: 'same-origin',
+				cache: 'no-store',
+				headers: BaseClient.getSessionID() ? { 'X-Session-ID': BaseClient.getSessionID()! } : {},
+			});
+			if (!response.ok) {
+				throw new Error('poster source request failed');
+			}
+			const rawRevision = response.headers.get('X-Poster-Revision');
+			const fingerprint = (response.headers.get('X-Poster-Fingerprint') ?? '').toLowerCase();
+			const revision = rawRevision === null ? Number.NaN : Number(rawRevision);
+			if (!Number.isSafeInteger(revision) || revision < 0 || !/^[0-9a-f]{64}$/.test(fingerprint)) {
+				throw new Error('poster source identity is unavailable');
+			}
+			const body = await response.blob();
+			return {
+				displayURL: URL.createObjectURL(body),
+				identity: { revision, fingerprint },
+			};
 		},
-		setCropApplying: (applying) => { cropApplying = applying; }
+		releaseCropAsset: (displayURL) => {
+			if (displayURL.startsWith('blob:')) URL.revokeObjectURL(displayURL);
+		},
+		applyPosterFromUrlAsync: (resultId, url) => mutations.applyPosterFromUrlAsync(resultId, url),
+		mutatePosterCropAsync: (mutationJobId, resultId, crop, maxPosterHeightArg, identity) => {
+			return mutations.applyPosterCropAsync(
+				mutationJobId,
+				resultId,
+				crop,
+				maxPosterHeightArg,
+				identity,
+			);
+		},
+		setCropApplying: (applying) => {
+			cropApplying = applying;
+		},
 	});
 
 	const reviewPageController = createReviewPageController({
@@ -1171,17 +1227,21 @@ export function createReviewState(pageStore: Page) {
 	}
 
 	function buildReviewOverrides(): ReviewApplyOverrides {
-		return buildReviewApplyOverrides({
-			destinationPath,
-			forceOverwrite,
-			preserveNfo,
-			skipNfo,
-			skipDownload,
-			overwriteExistingMedia,
-			applyPreset,
-			applyScalarStrategy,
-			applyArrayStrategy
-		}, isUpdateMode, getEffectiveOperationMode() as ReviewApplyOverrides['operation_mode']);
+		return buildReviewApplyOverrides(
+			{
+				destinationPath,
+				forceOverwrite,
+				preserveNfo,
+				skipNfo,
+				skipDownload,
+				overwriteExistingMedia,
+				applyPreset,
+				applyScalarStrategy,
+				applyArrayStrategy,
+			},
+			isUpdateMode,
+			getEffectiveOperationMode() as ReviewApplyOverrides['operation_mode'],
+		);
 	}
 
 	async function organizeAll() {
@@ -1605,13 +1665,29 @@ export function createReviewState(pageStore: Page) {
 			overwriteExistingMedia = v;
 			if (v) skipDownload = false;
 		},
-		get applyPreset() { return applyPreset; },
-		set applyPreset(v) { applyPreset = v; },
-		get applyScalarStrategy() { return applyScalarStrategy; },
-		set applyScalarStrategy(v) { applyScalarStrategy = v; applyPreset = undefined; },
-		get applyArrayStrategy() { return applyArrayStrategy; },
-		set applyArrayStrategy(v) { applyArrayStrategy = v; applyPreset = undefined; },
-		get usesLegacyApplyDefaults() { return !job?.apply_plan; },
+		get applyPreset() {
+			return applyPreset;
+		},
+		set applyPreset(v) {
+			applyPreset = v;
+		},
+		get applyScalarStrategy() {
+			return applyScalarStrategy;
+		},
+		set applyScalarStrategy(v) {
+			applyScalarStrategy = v;
+			applyPreset = undefined;
+		},
+		get applyArrayStrategy() {
+			return applyArrayStrategy;
+		},
+		set applyArrayStrategy(v) {
+			applyArrayStrategy = v;
+			applyPreset = undefined;
+		},
+		get usesLegacyApplyDefaults() {
+			return !job?.apply_plan;
+		},
 		get showImagePanelContent() {
 			return showImagePanelContent;
 		},
@@ -1807,11 +1883,17 @@ export function createReviewState(pageStore: Page) {
 		get canOrganize() {
 			return canOrganize;
 		},
-		get canPreviewOutput() { return canPreviewOutput; },
-		get applyInvalid() { return applyInvalid; },
+		get canPreviewOutput() {
+			return canPreviewOutput;
+		},
+		get applyInvalid() {
+			return applyInvalid;
+		},
 		posterFromUrlMutation: mutations.posterFromUrlMutation,
 		posterCropMutation: mutations.posterCropMutation,
-		get posterCropSaving() { return mutations.posterCropMutation.isPending || cropApplying; },
+		get posterCropSaving() {
+			return mutations.posterCropMutation.isPending || cropApplying;
+		},
 		bulkExcludeMutation: mutations.bulkExcludeMutation,
 		bulkRescrapeMutation: mutations.bulkRescrapeMutation,
 		resolvePosterUrl,
@@ -1824,8 +1906,12 @@ export function createReviewState(pageStore: Page) {
 		useScreenshotAsPoster,
 		useScreenshotAsCover,
 		saveAllEdits,
-		get isSavingEdits() { return mutations.saveEditsMutation.isPending; },
-		get editedMovieCount() { return editedMovies.size; },
+		get isSavingEdits() {
+			return mutations.saveEditsMutation.isPending;
+		},
+		get editedMovieCount() {
+			return editedMovies.size;
+		},
 		get selectedMovieIds() {
 			return selectedMovieIds;
 		},

@@ -22,6 +22,11 @@ export interface PosterCropDragState {
 	originY: number;
 }
 
+export interface PosterAssetIdentity {
+	revision: number;
+	fingerprint: string;
+}
+
 interface PosterCropControllerDeps {
 	getBrowser: () => boolean;
 	getJobId: () => string;
@@ -43,14 +48,39 @@ interface PosterCropControllerDeps {
 	getCropDragState: () => PosterCropDragState | null;
 	setCropDragState: (state: PosterCropDragState | null) => void;
 	getPosterCropStates: () => Map<string, PosterCropState>;
+	getCropAssetIdentity?: () => Promise<PosterAssetIdentity | null>;
+	prepareCropAsset?: (
+		sourceURL: string,
+	) => Promise<{ displayURL: string; identity: PosterAssetIdentity }>;
+	releaseCropAsset?: (displayURL: string) => void;
 	applyPosterFromUrlAsync: (resultId: string, url: string) => Promise<void>;
-	mutatePosterCropAsync: (jobId: string, resultId: string, crop: PosterCropBox, maxPosterHeight?: number) => Promise<void>;
+	mutatePosterCropAsync: (
+		jobId: string,
+		resultId: string,
+		crop: PosterCropBox,
+		maxPosterHeight?: number,
+		identity?: PosterAssetIdentity,
+	) => Promise<void>;
 	setCropApplying: (applying: boolean) => void;
 	now?: () => number;
 }
 
 export function createPosterCropController(deps: PosterCropControllerDeps) {
 	const now = deps.now ?? Date.now;
+	let cropAssetIdentity: PosterAssetIdentity | null = null;
+	let cropAssetPreparing = false;
+	let cropAssetGeneration = 0;
+	let cropDisplayURL: string | null = null;
+
+	function discardPreparedCropAsset() {
+		cropAssetGeneration += 1;
+		cropAssetPreparing = false;
+		cropAssetIdentity = null;
+		if (cropDisplayURL) {
+			deps.releaseCropAsset?.(cropDisplayURL);
+			cropDisplayURL = null;
+		}
+	}
 
 	function refreshPosterCropMetrics() {
 		const cropImageElement = deps.getCropImageElement();
@@ -71,6 +101,10 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 	}
 
 	function handlePosterCropImageLoad(event: Event) {
+		// When the production loader is preparing a blob URL, the placeholder
+		// image must not become the measured crop source. The eventual load event
+		// for the fetched response is the only one that establishes geometry.
+		if (cropAssetPreparing) return;
 		deps.setPosterCropLoadError(null);
 
 		const imageElement = event.currentTarget as HTMLImageElement | null;
@@ -114,12 +148,20 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		refreshPosterCropMetrics();
 	}
 
-	function handlePosterCropImageError() {
+	function getLegacyPosterCropSourceURL(sourceURL: string): string | null {
+		if (!sourceURL.includes('-full.jpg')) return null;
 		const currentMovie = deps.getCurrentMovie();
-		if (currentMovie && deps.getCropSourceURL().includes('-full.jpg')) {
-			const posterMovieId = deps.getCurrentResult()?.movie?.id || deps.getCurrentResult()?.movie_id || currentMovie.id;
-			const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg${sessionParam()}`;
-			deps.setCropSourceURL(`${fallbackURL}${fallbackURL.includes('?') ? '&' : '?'}v=${now()}`);
+		if (!currentMovie) return null;
+		const posterMovieId =
+			deps.getCurrentResult()?.movie?.id || deps.getCurrentResult()?.movie_id || currentMovie.id;
+		const fallbackURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}.jpg${sessionParam()}`;
+		return `${fallbackURL}${fallbackURL.includes('?') ? '&' : '?'}v=${now()}`;
+	}
+
+	function handlePosterCropImageError() {
+		const fallbackURL = getLegacyPosterCropSourceURL(deps.getCropSourceURL());
+		if (fallbackURL) {
+			deps.setCropSourceURL(fallbackURL);
 			return;
 		}
 
@@ -163,7 +205,14 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		}
 		const posterMovieId = currentResult?.movie?.id || currentResult?.movie_id || currentMovie.id;
 		const sourceURL = `/api/v1/temp/posters/${deps.getJobId()}/${posterMovieId}-full.jpg${sessionParam()}`;
-		deps.setCropSourceURL(`${sourceURL}${sourceURL.includes('?') ? '&' : '?'}v=${now()}`);
+		const resolvedSourceURL = `${sourceURL}${sourceURL.includes('?') ? '&' : '?'}v=${now()}`;
+		discardPreparedCropAsset();
+		cropAssetPreparing = Boolean(deps.prepareCropAsset);
+		deps.setCropSourceURL(
+			deps.prepareCropAsset
+				? 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs='
+				: resolvedSourceURL,
+		);
 		deps.setPosterCropLoadError(null);
 		deps.setCropMetrics(null);
 		deps.setCropBox(null);
@@ -171,6 +220,50 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 		deps.setCropImageElement(null);
 		deps.setCropDragState(null);
 		deps.setShowPosterCropModal(true);
+
+		if (deps.prepareCropAsset) {
+			const generation = cropAssetGeneration;
+			const prepareCropAsset = deps.prepareCropAsset;
+			const installPreparedCropAsset = (asset: {
+				displayURL: string;
+				identity: PosterAssetIdentity;
+			}) => {
+				if (generation !== cropAssetGeneration) {
+					deps.releaseCropAsset?.(asset.displayURL);
+					return;
+				}
+				cropAssetIdentity = asset.identity;
+				cropAssetPreparing = false;
+				cropDisplayURL = asset.displayURL;
+				deps.setCropSourceURL(asset.displayURL);
+			};
+			const failPreparedCropAsset = () => {
+				if (generation !== cropAssetGeneration) return;
+				cropAssetPreparing = false;
+				cropAssetIdentity = null;
+				deps.setPosterCropLoadError(
+					'Unable to load the installed poster source for manual cropping',
+				);
+				deps.setCropMetrics(null);
+				deps.setCropBox(null);
+			};
+			const prepare = (sourceURLToPrepare: string, allowLegacyFallback: boolean) => {
+				void prepareCropAsset(sourceURLToPrepare)
+					.then(installPreparedCropAsset)
+					.catch(() => {
+						if (generation !== cropAssetGeneration) return;
+						const fallbackURL = allowLegacyFallback
+							? getLegacyPosterCropSourceURL(resolvedSourceURL)
+							: null;
+						if (fallbackURL) {
+							prepare(fallbackURL, false);
+							return;
+						}
+						failPreparedCropAsset();
+					});
+			};
+			prepare(resolvedSourceURL, true);
+		}
 	}
 
 	function movePosterCropBox(event: MouseEvent) {
@@ -208,6 +301,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 
 	function closePosterCropModal() {
 		stopPosterCropDrag();
+		discardPreparedCropAsset();
 		deps.setShowPosterCropModal(false);
 	}
 
@@ -264,12 +358,55 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 			// shows the edited URL (via the image proxy) but the backend would
 			// crop the original scraped image, reverting the preview.
 			const serverPosterUrl = currentResult.movie?.poster_url;
-			if (currentMovie.poster_url && serverPosterUrl && currentMovie.poster_url !== serverPosterUrl) {
+			if (
+				currentMovie.poster_url &&
+				serverPosterUrl &&
+				currentMovie.poster_url !== serverPosterUrl
+			) {
 				await deps.applyPosterFromUrlAsync(currentResult.result_id, currentMovie.poster_url);
 			}
 
 			const maxPosterHeight = deps.getMaxPosterHeight();
-			await deps.mutatePosterCropAsync(deps.getJobId(), currentResult.result_id, cropBoxVal, maxPosterHeight ?? undefined);
+			let identity = cropAssetIdentity;
+			if (deps.prepareCropAsset) {
+				if (cropAssetPreparing || !identity) {
+					deps.setPosterCropLoadError(
+						'Unable to verify the displayed poster source. Reopen the crop and try again.',
+					);
+					return;
+				}
+			} else if (deps.getCropAssetIdentity) {
+				try {
+					identity = await deps.getCropAssetIdentity();
+				} catch {
+					deps.setPosterCropLoadError(
+						'Unable to verify the installed poster source. Reopen the crop and try again.',
+					);
+					return;
+				}
+				if (!identity) {
+					deps.setPosterCropLoadError(
+						'Unable to verify the installed poster source. Reopen the crop and try again.',
+					);
+					return;
+				}
+			}
+			if (identity) {
+				await deps.mutatePosterCropAsync(
+					deps.getJobId(),
+					currentResult.result_id,
+					cropBoxVal,
+					maxPosterHeight ?? undefined,
+					identity,
+				);
+			} else {
+				await deps.mutatePosterCropAsync(
+					deps.getJobId(),
+					currentResult.result_id,
+					cropBoxVal,
+					maxPosterHeight ?? undefined,
+				);
+			}
 		} catch {
 			// Errors are surfaced via toasts in the mutation handlers; abort the flow.
 		} finally {
@@ -284,6 +421,7 @@ export function createPosterCropController(deps: PosterCropControllerDeps) {
 
 	function cleanup() {
 		stopPosterCropDrag();
+		discardPreparedCropAsset();
 	}
 
 	return {
