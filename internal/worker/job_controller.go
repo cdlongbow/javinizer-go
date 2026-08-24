@@ -474,6 +474,7 @@ func (c *jobController) buildApplyInputs(wf workflow.WorkflowInterface, batchCfg
 		NFOEnabled:       batchCfg.NFOEnabled,
 		WF:               wf,
 		Results:          snap.Results,
+		Provenance:       snap.Provenance,
 		Excluded:         snap.Excluded,
 		Destination:      cfg.Destination,
 		Update:           upd,

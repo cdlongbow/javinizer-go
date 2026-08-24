@@ -147,6 +147,7 @@ type applyPhaseInputs struct {
 
 	// Current state snapshot (frozen at construction, not live)
 	Results     map[string]*resultstore.MovieResult
+	Provenance  map[string]*resultstore.ProvenanceData
 	Excluded    map[string]bool
 	Destination string
 	Update      bool // Update mode (in-place, no file organization)

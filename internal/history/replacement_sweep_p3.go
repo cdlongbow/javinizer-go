@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/javinizer/javinizer-go/internal/database"
 	"github.com/javinizer/javinizer-go/internal/fsutil"
@@ -180,6 +181,25 @@ func quarantineReplacementBackupForRemoval(fs afero.Fs, backup, phase string, en
 	}
 	if handle == nil {
 		// The journaled name was genuinely absent — removed already.
+		return &replacementBackupQuarantine{fs: fs, backup: backup, phase: phase, unlinked: true}, nil
+	}
+	defer func() { _ = handle.Close() }()
+	hold, err := quarantineVerifiedBackup(fs, backup, phase, handle, verified)
+	if err != nil {
+		return nil, err
+	}
+	return hold, nil
+}
+
+// quarantineReplacementBackupForPrune preserves a partially moved quarantine
+// hold for the prune path; generic sweep callers retain their established
+// nil-hold error contract.
+func quarantineReplacementBackupForPrune(fs afero.Fs, backup, phase string, entry *models.ReplacementEntry, copiedFrom os.FileInfo) (*replacementBackupQuarantine, error) {
+	handle, verified, err := openVerifiedReplacementBackup(fs, backup, phase, entry, copiedFrom)
+	if err != nil {
+		return nil, err
+	}
+	if handle == nil {
 		return &replacementBackupQuarantine{fs: fs, backup: backup, phase: phase, unlinked: true}, nil
 	}
 	defer func() { _ = handle.Close() }()
@@ -438,6 +458,281 @@ func NewReplacementSweeper(fs afero.Fs, repo database.BatchFileOperationReposito
 	return &ReplacementSweeper{fs: fs, repo: repo, pendingRemovals: map[string]string{}}
 }
 
+// PruneOperationBackups removes replacement backups belonging to operation rows
+// that are about to be pruned. The caller keeps those rows live until this hook
+// succeeds, so a crash or failed cleanup leaves durable ledger ownership.
+func (s *ReplacementSweeper) PruneOperationBackups(ctx context.Context, ops []models.BatchFileOperation) error {
+	if len(ops) == 0 {
+		return nil
+	}
+	if s == nil || s.fs == nil || s.repo == nil {
+		return fmt.Errorf("prune operation backups: sweeper is not configured")
+	}
+
+	candidateIDs := make(map[uint]struct{}, len(ops))
+	for _, op := range ops {
+		candidateIDs[op.ID] = struct{}{}
+	}
+	var errs []error
+	consumed := make(map[uint]map[string]struct{})
+	markConsumed := func(opID uint, backup string) {
+		if consumed[opID] == nil {
+			consumed[opID] = make(map[string]struct{})
+		}
+		consumed[opID][backup] = struct{}{}
+	}
+pruneEntries:
+	for i := range ops {
+		gf, err := models.ParseGeneratedFiles(ops[i].GeneratedFiles)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("operation %d ledger parse: %w", ops[i].ID, err))
+			continue
+		}
+		for j := range gf.Replacements {
+			entry := gf.Replacements[j]
+			if strings.TrimSpace(entry.Backup) == "" || strings.TrimSpace(entry.Destination) == "" {
+				errs = append(errs, fmt.Errorf("operation %d has an incomplete replacement entry", ops[i].ID))
+				continue
+			}
+			if !entry.Installed {
+				errs = append(errs, fmt.Errorf("operation %d backup %s: install is unconfirmed", ops[i].ID, entry.Backup))
+				continue
+			}
+			if entry.PendingKind() == models.RestorePendingKindRearmRefused {
+				errs = append(errs, fmt.Errorf("operation %d backup %s: ownership is rearm-refused", ops[i].ID, entry.Backup))
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				errs = append(errs, err)
+				break pruneEntries
+			}
+
+			busyRelease, busyToken, busyErr := acquireReplacementBusyExFn(s.fs, entry.Destination)
+			if busyErr != nil {
+				errs = append(errs, fmt.Errorf("claim destination %s: %w", entry.Destination, busyErr))
+				continue
+			}
+			if busyRelease == nil || busyToken == "" {
+				if busyRelease != nil {
+					busyRelease()
+				}
+				errs = append(errs, fmt.Errorf("claim destination %s: busy-marker provenance unavailable", entry.Destination))
+				continue
+			}
+			claim, untrack := recordSweepBusyClaim(ctx, s.fs, entry.Destination, busyToken, busyRelease)
+			rawRelease := fsutil.SharedDestLocks().Acquire(entry.Destination)
+			if !claim.bindDestLock(rawRelease) {
+				rawRelease()
+				untrack()
+				claim.releaseAdmit()
+				busyRelease()
+				errs = append(errs, fmt.Errorf("claim destination %s was revoked before cleanup", entry.Destination))
+				continue
+			}
+			wasConsumed, pruneErr := s.pruneOperationBackup(ctx, ops[i].ID, entry, candidateIDs, claim)
+			claim.releaseAdmit()
+			claim.releaseDestLock()
+			untrack()
+			busyRelease()
+			if wasConsumed {
+				markConsumed(ops[i].ID, entry.Backup)
+			}
+			if pruneErr != nil {
+				errs = append(errs, fmt.Errorf("operation %d backup %s: %w", ops[i].ID, entry.Backup, pruneErr))
+			}
+		}
+	}
+	retractCtx := ctx
+	if retractCtx.Err() != nil {
+		retractCtx = context.WithoutCancel(retractCtx)
+	}
+	if len(errs) == 0 {
+		return s.retractConsumedEntries(retractCtx, consumed, candidateIDs)
+	}
+	if err := s.retractConsumedEntries(retractCtx, consumed, candidateIDs); err != nil {
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// retractConsumedEntries removes already-consumed backup entries from every
+// candidate row, including another row that shared the same backup spelling.
+// The journal RMW is durable and serialized with ordinary journal writers.
+func (s *ReplacementSweeper) retractConsumedEntries(parentCtx context.Context, consumed map[uint]map[string]struct{}, candidateIDs map[uint]struct{}) error {
+	if len(consumed) == 0 || len(candidateIDs) == 0 {
+		return nil
+	}
+	want := make(map[string]struct{})
+	for _, backups := range consumed {
+		for backup := range backups {
+			want[sweepSlash(backup)] = struct{}{}
+		}
+	}
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parentCtx, 5*time.Second)
+	defer cancel()
+	var errs []error
+	for opID := range candidateIDs {
+		release, lockErr := acquireJournalLockWithin(ctx, strconv.Itoa(int(opID)))
+		if lockErr != nil {
+			errs = append(errs, fmt.Errorf("retract consumed entries lock for operation %d: %w", opID, lockErr))
+			continue
+		}
+		err := s.repo.UpdateJournalInTx(ctx, opID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+			gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+			if err != nil {
+				return models.GeneratedFilesJSON{}, false, err
+			}
+			kept := gf.Replacements[:0]
+			for _, entry := range gf.Replacements {
+				if _, remove := want[sweepSlash(entry.Backup)]; !remove {
+					kept = append(kept, entry)
+				}
+			}
+			if len(kept) == len(gf.Replacements) {
+				return gf, false, nil
+			}
+			gf.Replacements = kept
+			return gf, true, nil
+		})
+		release()
+		if errors.Is(err, database.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("retract consumed entries for operation %d: %w", opID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// acquireJournalLockWithin bounds the wait for the process-local journal lock.
+// If the context expires, the eventual acquirer releases immediately without
+// touching the row.
+func acquireJournalLockWithin(ctx context.Context, key string) (func(), error) {
+	result := make(chan func(), 1)
+	go func() { result <- fsutil.SharedJournalLocks().Acquire(key) }()
+	select {
+	case release := <-result:
+		return release, nil
+	case <-ctx.Done():
+		go func() { (<-result)() }()
+		return nil, ctx.Err()
+	}
+}
+
+// pruneOperationBackup rechecks all live ledger rows while the destination
+// locks are held. Candidate rows are ignored because they are the rows this
+// pre-delete cleanup is about to retire; any other row keeps the backup alive.
+func (s *ReplacementSweeper) pruneOperationBackup(ctx context.Context, opID uint, entry models.ReplacementEntry, candidateIDs map[uint]struct{}, claim *sweepBusyMarkerClaim) (bool, error) {
+	defer func() {
+		if claim != nil {
+			claim.releaseAdmit()
+		}
+	}()
+	rows, err := s.repo.FindOperationsWithLedger(ctx)
+	if err != nil {
+		return false, fmt.Errorf("read live ledger: %w", err)
+	}
+	want := sweepSlash(entry.Backup)
+	for i := range rows {
+		if _, candidate := candidateIDs[rows[i].ID]; candidate {
+			continue
+		}
+		gf, parseErr := models.ParseGeneratedFiles(rows[i].GeneratedFiles)
+		if parseErr != nil {
+			return false, fmt.Errorf("cannot prove backup %s is unreferenced by operation %d: %w", entry.Backup, rows[i].ID, parseErr)
+		}
+		for _, live := range gf.Replacements {
+			if sweepSlash(live.Backup) == want {
+				return false, nil
+			}
+		}
+	}
+
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if claim != nil && claim.abandonIfRevoked("prune backup quarantine", entry.Backup, entry.Destination) {
+		return false, fsutil.ErrReplacementBusy
+	}
+	if err := s.markPruneCleanupPending(opID, entry); err != nil {
+		return false, err
+	}
+	hold, err := quarantineReplacementBackupForPrune(s.fs, entry.Backup, "organized-job prune", &entry, nil)
+	if err != nil {
+		if hold != nil && hold.moved {
+			return false, errors.Join(err, s.persistPruneQuarantine(opID, entry, hold.quarantine))
+		}
+		return false, err
+	}
+	if hold == nil || hold.unlinked {
+		return false, fmt.Errorf("backup %s is absent during prune", entry.Backup)
+	}
+	if err := ctx.Err(); err != nil {
+		return false, s.joinPruneRestoreFailure(opID, entry, hold, err)
+	}
+	if claim != nil && claim.abandonIfRevoked("prune backup unlink", entry.Backup, entry.Destination) {
+		return false, errors.Join(fsutil.ErrReplacementBusy, s.persistPruneQuarantine(opID, entry, hold.quarantine))
+	}
+	if err := hold.removeVerified(); err != nil {
+		if hold.moved {
+			return false, errors.Join(err, s.persistPruneQuarantine(opID, entry, hold.quarantine))
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// joinPruneRestoreFailure retains a durable ledger pointer to the quarantine
+// name when compensation cannot restore the original backup name.
+func (s *ReplacementSweeper) joinPruneRestoreFailure(opID uint, entry models.ReplacementEntry, hold *replacementBackupQuarantine, cause error) error {
+	if restoreErr := hold.restore(); restoreErr != nil {
+		return errors.Join(cause, restoreErr, s.persistPruneQuarantine(opID, entry, hold.quarantine))
+	}
+	return cause
+}
+
+// markPruneCleanupPending durably records the two-phase cleanup intent
+// before any backup bytes move. A crash leaves a retryable pending entry.
+func (s *ReplacementSweeper) markPruneCleanupPending(opID uint, entry models.ReplacementEntry) error {
+	ctx, cancel := context.WithTimeout(database.WithPruneMaintenance(context.Background()), 30*time.Second)
+	defer cancel()
+	return markReplacementEntryRestorePendingKind(ctx, s.repo, opID, sweepSlash(entry.Backup), models.RestorePendingKindPrune)
+}
+
+// persistPruneQuarantine moves the durable ledger pointer to the recoverable
+// quarantine object and marks cleanup pending so a later retry never treats a
+// missing original name as already consumed.
+func (s *ReplacementSweeper) persistPruneQuarantine(opID uint, original models.ReplacementEntry, quarantine string) error {
+	release := fsutil.SharedJournalLocks().Acquire(strconv.Itoa(int(opID)))
+	defer release()
+	return s.persistPruneQuarantineLocked(opID, original, quarantine)
+}
+
+func (s *ReplacementSweeper) persistPruneQuarantineLocked(opID uint, original models.ReplacementEntry, quarantine string) error {
+	ctx, cancel := context.WithTimeout(database.WithPruneMaintenance(context.Background()), 30*time.Second)
+	defer cancel()
+	err := s.repo.UpdateJournalInTx(ctx, opID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+		gf, err := models.ParseGeneratedFiles(current.GeneratedFiles)
+		if err != nil {
+			return models.GeneratedFilesJSON{}, false, err
+		}
+		for i := range gf.Replacements {
+			if sweepSlash(gf.Replacements[i].Backup) != sweepSlash(original.Backup) || sweepSlash(gf.Replacements[i].Destination) != sweepSlash(original.Destination) {
+				continue
+			}
+			gf.Replacements[i].Backup = quarantine
+			gf.Replacements[i].SetRestorePending(models.RestorePendingKindPrune)
+			return gf, true, nil
+		}
+		return gf, false, nil
+	})
+	return err
+}
+
 // rememberPendingRemoval records the in-process cleanup authorization with
 // the legacy CLEAN kind (the backup name still holds the operation's own
 // bytes — e.g. its removal just failed).
@@ -519,7 +814,8 @@ type replacementLedgerIndex struct {
 	// LIVE ledger may authorize (the orphan posture retains + warns instead).
 	journaled       map[string]*models.BatchFileOperation // backup path → owning row
 	dirs            map[string]bool                       // directories holding journaled destinations
-	refusedPendings []rearmRefusedLedgerEntry             // wave-29: ledger-only rearm-refused pendings
+	refusedPendings []rearmRefusedLedgerEntry
+	prunePendings   []prunePendingLedgerEntry // wave-29: ledger-only rearm-refused pendings
 }
 
 // rearmRefusedLedgerEntry is one journaled restore-pending entry of the
@@ -533,6 +829,18 @@ type rearmRefusedLedgerEntry struct {
 	backup      string // recorded spelling — never a path-operation target here
 	dest        string // recorded spelling of the certified destination
 	backupSlash string // probe-aware journal key
+}
+
+// prunePendingLedgerEntry is a durable retention intent that may need a
+// ledger-only retry after the process crashed between backup quarantine and
+// journal consumption. backup is the current filesystem path to clean;
+// journalBackup is the spelling stored in the ledger.
+type prunePendingLedgerEntry struct {
+	rowID         uint
+	backup        string
+	journalBackup string
+	dest          string
+	backupSlash   string
 }
 
 func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex, error) {
@@ -561,7 +869,13 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 			continue
 		}
 		for _, rep := range gf.Replacements {
-			idx.journaled[sweepSlash(rep.Backup)] = row
+			backupSlash := sweepSlash(rep.Backup)
+			idx.journaled[backupSlash] = row
+			if rep.RestorePending && rep.PendingKind() == models.RestorePendingKindPrune {
+				idx.prunePendings = append(idx.prunePendings, prunePendingLedgerEntry{
+					rowID: row.ID, backup: rep.Backup, journalBackup: rep.Backup, dest: rep.Destination, backupSlash: backupSlash,
+				})
+			}
 			// Dirs are FS ENUMERATION paths — keep their recorded case (the
 			// probe-aware key is only a comparison form).
 			idx.dirs[filepath.ToSlash(filepath.Clean(filepath.Dir(rep.Destination)))] = true
@@ -598,6 +912,74 @@ func (s *ReplacementSweeper) index(ctx context.Context) (*replacementLedgerIndex
 		}
 	}
 	return idx, nil
+}
+
+// consumePrunePending retries one durable retention intent under the same
+// destination/busy-marker claim discipline as ordinary sweep legs. Prune
+// cleanup is intentionally allowed to consume journal-only when its backup
+// path is already absent: that absence means unlink completed before the
+// process crashed, not that destination bytes were restored.
+func (s *ReplacementSweeper) consumePrunePending(ctx context.Context, idx *replacementLedgerIndex, entry prunePendingLedgerEntry) int {
+	busyRelease, busyToken, busyErr := acquireReplacementBusyExFn(s.fs, entry.dest)
+	if errors.Is(busyErr, fsutil.ErrReplacementBusy) {
+		return 0
+	}
+	if busyErr != nil || busyToken == "" {
+		if busyErr == nil {
+			busyRelease()
+		}
+		return 0
+	}
+	defer busyRelease()
+	claim, untrack := recordSweepBusyClaim(ctx, s.fs, entry.dest, busyToken, busyRelease)
+	defer untrack()
+	defer claim.releaseAdmit()
+	rawDestRelease := fsutil.SharedDestLocks().Acquire(entry.dest)
+	if !claim.bindDestLock(rawDestRelease) {
+		rawDestRelease()
+		claim.abandonIfRevoked("destination lock acquisition", entry.backup, entry.dest)
+		return 0
+	}
+	defer claim.releaseDestLock()
+	if s.retryPendingRemovalClaimed(database.WithPruneMaintenance(ctx), entry.rowID, entry.backup, entry.dest, entry.backupSlash, claim) {
+		delete(idx.journaled, entry.backupSlash)
+		return 1
+	}
+	return 0
+}
+
+// sweepPruneQuarantine routes a .dlq object back to the prune intent that
+// owns its original .dlbak name. This closes the crash window between the
+// verified quarantine move and persistence of the new ledger pointer.
+func (s *ReplacementSweeper) sweepPruneQuarantine(ctx context.Context, idx *replacementLedgerIndex, dirSlash string, e os.FileInfo) int {
+	quarantine := filepath.FromSlash(dirSlash + "/" + e.Name())
+	original := originalReplacementBackupFromQuarantine(quarantine)
+	journalBackup := original
+	owner, ok := idx.journaled[sweepSlash(journalBackup)]
+	if !ok {
+		journalBackup = quarantine
+		owner, ok = idx.journaled[sweepSlash(journalBackup)]
+	}
+	if !ok || journalEntryPendingKind(owner, sweepSlash(journalBackup)) != models.RestorePendingKindPrune {
+		return 0
+	}
+	return s.consumePrunePending(ctx, idx, prunePendingLedgerEntry{
+		rowID: owner.ID, backup: quarantine, journalBackup: journalBackup,
+		dest: journalEntryDestination(owner, sweepSlash(journalBackup)), backupSlash: sweepSlash(journalBackup),
+	})
+}
+
+func journalEntryDestination(row *models.BatchFileOperation, backupSlash string) string {
+	gf, err := models.ParseGeneratedFiles(row.GeneratedFiles)
+	if err != nil {
+		return ""
+	}
+	for _, rep := range gf.Replacements {
+		if sweepSlash(rep.Backup) == backupSlash {
+			return rep.Destination
+		}
+	}
+	return ""
 }
 
 // Sweep runs a full startup sweep: every directory that holds a journaled
@@ -657,11 +1039,27 @@ func (s *ReplacementSweeper) Sweep(ctx context.Context) (int, error) {
 			return healed, err
 		}
 		for _, e := range entries {
-			if e.IsDir() || !IsReplacementBackupName(e.Name()) {
+			if e.IsDir() {
 				continue
 			}
-			healed += s.sweepOne(ctx, idx, dir, e)
+			switch {
+			case IsReplacementBackupName(e.Name()):
+				healed += s.sweepOne(ctx, idx, dir, e)
+			case isReplacementBackupQuarantineName(e.Name()):
+				healed += s.sweepPruneQuarantine(ctx, idx, dir, e)
+			}
 		}
+	}
+	// A prune intent whose original name is absent and whose quarantine move
+	// was not visible to the directory scan still converges journal-only.
+	for _, entry := range idx.prunePendings {
+		if _, ok := idx.journaled[entry.backupSlash]; !ok {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return healed, err
+		}
+		healed += s.consumePrunePending(ctx, idx, entry)
 	}
 	return healed, nil
 }
@@ -1009,7 +1407,11 @@ func (s *ReplacementSweeper) restoreAndConsume(ctx context.Context, row *models.
 				return false
 			}
 		}
-		return s.retryPendingRemovalClaimed(ctx, row.ID, backup, dest, backupSlash, claim)
+		retryCtx := ctx
+		if journalEntryPendingKind(row, backupSlash) == models.RestorePendingKindPrune {
+			retryCtx = database.WithPruneMaintenance(ctx)
+		}
+		return s.retryPendingRemovalClaimed(retryCtx, row.ID, backup, dest, backupSlash, claim)
 	} else if !errors.Is(lstatErr, afero.ErrFileNotFound) {
 		logging.Warnf("replacement sweep %s: destination indeterminate (%v) — kept", backup, lstatErr)
 		return false
@@ -1588,9 +1990,35 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 	// rearm-refused memory DOMINATES — a refused re-arm this process watched
 	// is fresher ownership evidence than the committed (clean) posture.
 	effectiveKind := durableKind
-	if fallbackKind, ok := s.pendingRemovalKind(backupSlash); ok && fallbackKind == models.RestorePendingKindRearmRefused {
-		effectiveKind = models.RestorePendingKindRearmRefused
+	if fallbackKind, ok := s.pendingRemovalKind(backupSlash); ok && (fallbackKind == models.RestorePendingKindRearmRefused || fallbackKind == models.RestorePendingKindPrune) {
+		effectiveKind = fallbackKind
 	}
+	if effectiveKind == models.RestorePendingKindPrune {
+		// A prune intent deliberately removes the old bytes while the
+		// organized destination remains in place. If the process crashed after
+		// unlink but before journal consumption, the absent path is evidence of
+		// completed prune cleanup, so consume journal-only; never re-arm from
+		// the organized destination.
+		if _, backupErr := lstatRestoreSource(s.fs, backup); errors.Is(backupErr, afero.ErrFileNotFound) {
+			if claim.abandonIfRevoked("prune pending journal consumption", backup, dest) {
+				return false
+			}
+			consumeCtx := database.WithPruneMaintenance(ctx)
+			uErr := s.repo.UpdateJournalInTx(consumeCtx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+				return consumeSweepJournalEntry(current, backupSlash)
+			})
+			if uErr == nil {
+				s.forgetPendingRemoval(backupSlash)
+				return true
+			}
+			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindPrune)
+			logging.Warnf("replacement sweep %s: prune-pending journal consumption failed after the backup was already absent: %v", backup, uErr)
+			return false
+		} else if backupErr != nil {
+			return false
+		}
+	}
+
 	if effectiveKind == models.RestorePendingKindRearmRefused {
 		// Rearm-refused pending (wave-19): destination bytes were certified in
 		// place when the marker was set and the backup name is unowned — skip
@@ -1641,8 +2069,17 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 	if claim.abandonIfRevoked("clean pending backup quarantine removal", backup, dest) {
 		return false
 	}
-	hold, rmErr := quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
-	if rmErr == nil {
+	var hold *replacementBackupQuarantine
+	var rmErr error
+	if effectiveKind == models.RestorePendingKindPrune {
+		hold, rmErr = quarantineReplacementBackupForPrune(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
+	} else {
+		hold, rmErr = quarantineReplacementBackupForRemoval(s.fs, backup, "replacement sweep", &durableEntry, backupInfo)
+	}
+	if rmErr != nil && effectiveKind == models.RestorePendingKindPrune && hold != nil && hold.moved {
+		_ = s.persistPruneQuarantineLocked(rowID, durableEntry, hold.quarantine)
+	}
+	if rmErr == nil && effectiveKind != models.RestorePendingKindPrune {
 		if _, derr := lstatRestoreSource(s.fs, dest); derr != nil {
 			if rerr := hold.restore(); rerr != nil {
 				// Wave-36 (codex local review round 6, PR#215 finding F3): the
@@ -1671,6 +2108,8 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 			s.rememberPendingRemoval(backupSlash)
 			return false
 		}
+	}
+	if rmErr == nil {
 		rmErr = hold.removeVerified()
 	}
 	if rmErr != nil {
@@ -1688,14 +2127,18 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 		// rearm-refused (journal-only) kind — durable and in-process alike —
 		// or the clean-kind retry would wait forever on a file that can
 		// never reappear.
-		if errors.Is(rmErr, errReplacementBackupQuarantineVanished) {
+		if errors.Is(rmErr, errReplacementBackupQuarantineVanished) && effectiveKind != models.RestorePendingKindPrune {
 			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindRearmRefused)
 			if markErr := s.persistRestorePendingMarkerKind(ctx, rowID, backupSlash, models.RestorePendingKindRearmRefused); markErr != nil {
 				logging.Warnf("replacement sweep %s: vanished-quarantine removal could not persist the rearm-refused upgrade (%v after %v) — entry stays clean-pending for later arbitration", backup, markErr, rmErr)
 			}
 			return false
 		}
-		s.rememberPendingRemoval(backupSlash)
+		if effectiveKind == models.RestorePendingKindPrune {
+			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindPrune)
+		} else {
+			s.rememberPendingRemoval(backupSlash)
+		}
 		return false
 	}
 	// Wave-52 (round 7, finding F1, stage d): the consumption update — a
@@ -1706,7 +2149,11 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 	if claim.abandonIfRevoked("clean pending journal consumption", backup, dest) {
 		return false
 	}
-	uErr := s.repo.UpdateJournalInTx(ctx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
+	consumeCtx := ctx
+	if effectiveKind == models.RestorePendingKindPrune {
+		consumeCtx = database.WithPruneMaintenance(ctx)
+	}
+	uErr := s.repo.UpdateJournalInTx(consumeCtx, rowID, func(current *models.BatchFileOperation) (models.GeneratedFilesJSON, bool, error) {
 		return consumeSweepJournalEntry(current, backupSlash)
 	})
 	if uErr != nil {
@@ -1716,6 +2163,14 @@ func (s *ReplacementSweeper) retryPendingRemovalClaimed(ctx context.Context, row
 		// point), and the clean-kind retry tolerates the absent name — the
 		// resting shape needs nothing else.
 		if claim.abandonIfRevoked("clean pending consumption compensation (re-arm)", backup, dest) {
+			return false
+		}
+		if effectiveKind == models.RestorePendingKindPrune {
+			s.rememberPendingRemovalKind(backupSlash, models.RestorePendingKindPrune)
+			if markErr := s.persistRestorePendingMarkerKind(database.WithPruneMaintenance(ctx), rowID, backupSlash, models.RestorePendingKindPrune); markErr != nil {
+				logging.Warnf("replacement sweep %s: prune-pending consumption failed (%v) and marker persistence failed (%v)", backup, uErr, markErr)
+			}
+			logging.Warnf("replacement sweep %s: prune-pending consumption failed: %v — backup cleanup will retry without re-arming from organized bytes", backup, uErr)
 			return false
 		}
 		fallbackKind := models.RestorePendingKindClean

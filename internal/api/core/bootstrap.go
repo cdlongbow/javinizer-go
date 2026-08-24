@@ -56,6 +56,15 @@ func bootstrapAPIDeps(cfg *config.Config, configFile string, auth commandutil.Au
 	fs := afero.NewOsFs()
 	jobStore := worker.NewJobStore(repos.JobRepo, repos.BatchFileOpRepo, repos.MovieRepo, cfg.System.TempDir, sharedEngine, fs, worker.WithActressRepo(repos.ActressRepo), worker.WithHistoryRepo(repos.HistoryRepo), worker.WithEditTransactor(coreDeps.DB))
 	eventEmitter := eventlog.NewEmitter(repos.EventRepo)
+	pruneSweeper := history.NewReplacementSweeper(fs, repos.BatchFileOpRepo)
+	if setter, ok := repos.JobRepo.(interface {
+		SetOrganizedJobPruneHook(func(context.Context, []models.BatchFileOperation) error)
+	}); ok {
+		setter.SetOrganizedJobPruneHook(pruneSweeper.PruneOperationBackups)
+	}
+	// The API server starts this configured sweep at the server boundary via
+	// rt.StartStartupSweep after bootstrap returns, keeping reconciliation
+	// asynchronous while still covering the API startup crash window.
 	reverter := history.NewReverter(fs, repos.BatchFileOpRepo)
 
 	apiDeps := &APIDeps{

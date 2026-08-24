@@ -372,17 +372,17 @@ func interpretApplyResult(
 				current.Error = errMsg
 				current.StartedAt = startTime
 				current.EndedAt = &now
-				return current, mergeWriteBackProvenance(nil, prov), nil
+				return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
 			})
 			if errUp != nil {
-				inputs.Updater.UpdateFileResult(filePath, &resultstore.MovieResult{
+				upsertWriteBackResultWithProvenance(inputs.Updater, filePath, &resultstore.MovieResult{
 					FileMatchInfo: afc.Match,
 					Movie:         movie,
 					Status:        fileStatus,
 					Error:         errMsg,
 					StartedAt:     startTime,
 					EndedAt:       &now,
-				})
+				}, inputs.Provenance[filePath])
 			}
 		}
 
@@ -446,7 +446,7 @@ func interpretApplyResult(
 						return current, prov, nil
 					}
 					current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
-					return current, mergeWriteBackProvenance(nil, prov), nil
+					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
 				})
 				if err2 != nil {
 					logging.Warnf("Failed to update movie result for %s after apply: %v", filePath, err2)
@@ -526,6 +526,7 @@ func applyFile(
 		// would then show the file as single-part.
 		fmi:              fileResult.FileMatchInfo,
 		movie:            fileResult.Movie,
+		provenance:       inputs.Provenance[filePath],
 		updater:          inputs.Updater,
 		broadcast:        broadcastFailure(inputs.Broadcaster, inputs.JobID, movie.ID, jobEventPhaseApply, "Apply"),
 		startTime:        startTime,
