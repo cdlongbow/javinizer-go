@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/logging"
@@ -163,6 +164,16 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		return ErrJobGone // gone check first (documented admit-before-state order)
 	}
 	ctx, cancel := context.WithCancel(ctx)
+	c.job.lifecycle.mu.RLock()
+	previousApplyGeneration := c.job.lifecycle.applyGeneration
+	c.job.lifecycle.mu.RUnlock()
+	rollbackApplyGeneration := func() {
+		c.job.lifecycle.mu.Lock()
+		if c.job.lifecycle.applyGeneration == previousApplyGeneration+1 {
+			c.job.lifecycle.applyGeneration = previousApplyGeneration
+		}
+		c.job.lifecycle.mu.Unlock()
+	}
 	// codex P1-G: the admission winner installs the CancelFunc below — a
 	// queued start never supplants the running phase's cancel handle.
 	pd, err := c.markStarted(models.JobStatusCompleted, JobPhaseApply, cancel)
@@ -176,6 +187,7 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 	}
 	entry, err := c.job.admission.BeginPhase(ctx)
 	if err != nil {
+		rollbackApplyGeneration()
 		cancel()
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			// claimed-but-never-launched: the legacy-observable Cancelled
@@ -198,6 +210,10 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		return err
 	}
 	release := entry.Downgrade()
+	if cfg.ApplyGenerationRef != nil {
+		lifecycleSnapshot := c.job.lifecycle.StatusSnapshot()
+		atomic.StoreUint64(cfg.ApplyGenerationRef, lifecycleSnapshot.ApplyGeneration)
+	}
 
 	// Commit apply-phase config values ONLY after markStarted succeeds, so a
 	// losing concurrent StartApply cannot clobber the winner's values. Both
@@ -225,6 +241,7 @@ func (c *jobController) StartApply(ctx context.Context, cfg ApplyPhaseConfig) er
 		if err := persistFn(); err != nil {
 			release()
 			cancel()
+			rollbackApplyGeneration()
 			c.job.lifecycle.MarkFailed()
 			close(pd) // no phase goroutine will run; Wait() joins on phaseDone
 			if err2 := persistFn(); err2 != nil {
@@ -347,6 +364,9 @@ func (c *jobController) markStarted(expectedFrom models.JobStatus, phase JobPhas
 	c.job.lifecycle.CancelFunc = cancelFunc
 	c.job.lifecycle.Status = models.JobStatusRunning
 	c.job.lifecycle.currentPhase = string(phase)
+	if phase == JobPhaseApply {
+		c.job.lifecycle.applyGeneration++
+	}
 	c.job.lifecycle.CompletedAt = nil
 	c.job.lifecycle.OrganizedAt = nil
 	c.job.lifecycle.done = make(chan struct{})

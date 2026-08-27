@@ -63,6 +63,7 @@ type batchJobBase struct {
 	ApplyPlan             *applyplan.Plan                 `json:"apply_plan,omitempty"`
 	PersistError          string                          `json:"persist_error,omitempty"`
 	CurrentPhase          string                          `json:"current_phase,omitempty"`
+	ApplyGeneration       uint64                          `json:"apply_generation"`
 	IsDeleted             bool                            `json:"is_deleted"`
 }
 
@@ -704,7 +705,9 @@ type ApplyPhaseConfig struct {
 	Download               bool  // Download media (poster, fanart, etc.)
 	DownloadExtrafanart    *bool // Optional override for extrafanart downloads; nil = use config default
 	OverwriteExistingMedia bool
-	DryRun                 bool // Dry-run mode: preview without making changes
+	DryRun                 bool     // Dry-run mode: preview without making changes
+	RetryFilePaths         []string // Apply only these previously failed result paths on retry
+	ApplyGenerationRef     *uint64  // Set to the actual lifecycle generation before apply starts
 
 	// Job-level config applied before apply starts
 	OperationModeOverride operationmode.OperationMode // resolved at factory boundary

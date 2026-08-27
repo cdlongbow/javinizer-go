@@ -394,6 +394,7 @@ export interface BatchJobResponse {
 	files?: string[];
 	started_at: string;
 	completed_at?: string;
+	apply_generation?: number;
 	operation_mode_override?: string;
 	update: boolean;
 	persist_error?: string;
@@ -418,6 +419,7 @@ export interface ProgressMessage {
 	total_files?: number;
 	completed?: number;
 	failed?: number;
+	apply_generation?: number;
 }
 
 export interface Genre {
@@ -668,6 +670,7 @@ export interface UpdateRequest {
 	array_strategy?: 'merge' | 'replace';
 	skip_nfo?: boolean;
 	skip_download?: boolean;
+	retry_file_paths?: string[];
 }
 
 export interface OrganizeRequest {
@@ -678,6 +681,7 @@ export interface OrganizeRequest {
 	operation_mode?: OperationMode;
 	skip_nfo?: boolean;
 	skip_download?: boolean;
+	retry_file_paths?: string[];
 }
 
 export interface OrganizeResponse {

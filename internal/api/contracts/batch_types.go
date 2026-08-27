@@ -132,6 +132,7 @@ type BatchJobResponse struct {
 	Results               map[string]*BatchFileResult `json:"results"`
 	StartedAt             string                      `json:"started_at"`
 	CompletedAt           *string                     `json:"completed_at,omitempty"`
+	ApplyGeneration       uint64                      `json:"apply_generation"`
 	OperationModeOverride operationmode.OperationMode `json:"operation_mode_override,omitempty"`
 	Update                bool                        `json:"update"`
 	PersistError          string                      `json:"persist_error,omitempty"`
@@ -152,6 +153,7 @@ type BatchJobResponseSlim struct {
 	Results               map[string]*BatchFileResultSlim `json:"results"`
 	StartedAt             string                          `json:"started_at"`
 	CompletedAt           *string                         `json:"completed_at,omitempty"`
+	ApplyGeneration       uint64                          `json:"apply_generation"`
 	OperationModeOverride operationmode.OperationMode     `json:"operation_mode_override,omitempty"`
 	Update                bool                            `json:"update"`
 	PersistError          string                          `json:"persist_error,omitempty"`
@@ -254,6 +256,7 @@ type UpdateRequest struct {
 	ArrayStrategy          string                `json:"array_strategy,omitempty" binding:"omitempty,oneof=merge replace"`
 	SkipNFO                bool                  `json:"skip_nfo"`
 	SkipDownload           bool                  `json:"skip_download"`
+	RetryFilePaths         []string              `json:"retry_file_paths,omitempty"`
 	present                map[string]bool       `json:"-"`
 }
 
@@ -274,14 +277,15 @@ func (r UpdateRequest) Has(field string) bool { return r.present[field] }
 
 // OrganizeRequest represents an organize request
 type OrganizeRequest struct {
-	Overrides     *ReviewApplyOverrides `json:"overrides,omitempty"`
-	Destination   string                `json:"destination" example:"/path/to/output"` // Required for organize mode; optional for in-place modes
-	CopyOnly      bool                  `json:"copy_only" example:"false"`
-	LinkMode      string                `json:"link_mode,omitempty" example:"hard"`          // Validated at the API layer (HTTP 400 for invalid)
-	OperationMode string                `json:"operation_mode,omitempty" example:"organize"` // Validated at the API layer (HTTP 400 for invalid)
-	SkipNFO       bool                  `json:"skip_nfo"`
-	SkipDownload  bool                  `json:"skip_download"`
-	present       map[string]bool       `json:"-"`
+	Overrides      *ReviewApplyOverrides `json:"overrides,omitempty"`
+	Destination    string                `json:"destination" example:"/path/to/output"` // Required for organize mode; optional for in-place modes
+	CopyOnly       bool                  `json:"copy_only" example:"false"`
+	LinkMode       string                `json:"link_mode,omitempty" example:"hard"`          // Validated at the API layer (HTTP 400 for invalid)
+	OperationMode  string                `json:"operation_mode,omitempty" example:"organize"` // Validated at the API layer (HTTP 400 for invalid)
+	SkipNFO        bool                  `json:"skip_nfo"`
+	SkipDownload   bool                  `json:"skip_download"`
+	RetryFilePaths []string              `json:"retry_file_paths,omitempty"`
+	present        map[string]bool       `json:"-"`
 }
 
 // UnmarshalJSON .

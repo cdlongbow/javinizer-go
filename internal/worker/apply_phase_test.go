@@ -456,6 +456,34 @@ func TestApplyPhase_Run_SkipsFailedResult(t *testing.T) {
 	assert.Equal(t, 0, wf.getApplyCalled(), "Workflow.Apply should NOT be called for failed results")
 }
 
+func TestApplyPhase_Run_OrganizesSuccessDespitePriorScrapeFailure(t *testing.T) {
+	wf := &stubApplyWorkflow{
+		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "GOOD-001"}},
+	}
+	inputs := makeApplyInputs(wf)
+	inputs.Results["/source/FAIL-002.mp4"] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/FAIL-002.mp4", MovieID: "FAIL-002"},
+		Status:        models.JobStatusFailed,
+		// Scrape failures have no movie and are skipped by apply.
+	}
+	inputs.Results["/source/GOOD-001.mp4"] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/GOOD-001.mp4", MovieID: "GOOD-001"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "GOOD-001", Title: "Test Movie"},
+	}
+
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+	})
+
+	lc := inputs.Lifecycle.(*stubLifecycle)
+	assert.True(t, lc.organized, "a successful apply must organize even when scrape left a failed row")
+	assert.False(t, lc.completed, "a skipped scrape failure must not downgrade the successful apply")
+	assert.Equal(t, 1, wf.getApplyCalled(), "only the successful scrape result should be applied")
+}
+
 func TestApplyPhase_Run_EmptyResults(t *testing.T) {
 	wf := &stubApplyWorkflow{
 		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
@@ -665,4 +693,88 @@ func TestApplyPhase_Run_CancellationMarksCancelled(t *testing.T) {
 	// The prior scrape-phase Movie is preserved on the cancel path too.
 	require.NotNil(t, r.Movie)
 	assert.Equal(t, "IPX-777", r.Movie.ID)
+}
+
+func TestApplyPhase_Run_RetriesExplicitFailedPath(t *testing.T) {
+	path := "/source/IPX-777.mp4"
+	wf := &stubApplyWorkflow{
+		applyResult: &workflow.ApplyResult{Movie: &models.Movie{ID: "IPX-777"}},
+	}
+	inputs := makeApplyInputs(wf)
+	inputs.Results[path] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
+		Status:        models.JobStatusFailed,
+		Movie:         &models.Movie{ID: "IPX-777", Title: "Test Movie"},
+	}
+	inputs.Results["/source/IPX-888.mp4"] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: "/source/IPX-888.mp4", MovieID: "IPX-888"},
+		Status:        models.JobStatusCompleted,
+		Movie:         &models.Movie{ID: "IPX-888", Title: "Already Applied"},
+	}
+	refreshedPath := "/source/IPX-999.mp4"
+	inputs.Results[refreshedPath] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: refreshedPath, MovieID: "IPX-999"},
+		Status:        models.JobStatusCompleted, // failed row was refreshed before retry
+		Movie:         &models.Movie{ID: "IPX-999", Title: "Refreshed Movie"},
+	}
+	remainingFailedPath := "/source/IPX-000.mp4"
+	inputs.Results[remainingFailedPath] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: remainingFailedPath, MovieID: "IPX-000"},
+		Status:        models.JobStatusFailed,
+		Movie:         &models.Movie{ID: "IPX-000", Title: "Still Failed"},
+	}
+	updater := inputs.Updater.(*stubUpdater)
+	updater.results[path] = &resultstore.MovieResult{
+		FileMatchInfo: models.FileMatchInfo{Path: path, MovieID: "IPX-777"},
+		Status:        models.JobStatusFailed,
+		Movie:         &models.Movie{ID: "IPX-777", Title: "Test Movie"},
+		Error:         "previous apply failed",
+	}
+
+	NewApplyPhase().Run(context.Background(), inputs, ApplyPhaseConfig{
+		OrganizeOptions: workflow.OrganizeOptions{MoveFiles: true},
+		MergeOptions:    workflow.MergeOptions{ForceOverwrite: true},
+		Destination:     "/output",
+		RetryFilePaths:  []string{path, refreshedPath},
+	})
+
+	assert.Equal(t, 2, wf.getApplyCalled(), "only explicitly selected paths must be retried")
+	assert.False(t, inputs.Lifecycle.(*stubLifecycle).organized, "a partial retry must not mark the phase organized while another failure remains")
+	assert.True(t, inputs.Lifecycle.(*stubLifecycle).completed, "a partial retry should remain completed until all failures are retried")
+	retried := updater.getResult(path)
+	require.NotNil(t, retried)
+	assert.Equal(t, models.JobStatusCompleted, retried.Status, "successful retry should clear the prior failed status")
+	assert.Empty(t, retried.Error, "successful retry should clear the prior failure")
+}
+
+func TestCountRemainingApplyFailures_TracksLiveWritebackAndOutcomes(t *testing.T) {
+	store := resultstore.New(2, []string{"/prior-failure", "/skipped-failure"})
+	store.UpdateFileResult("/prior-failure", &resultstore.MovieResult{
+		Status: models.JobStatusCompleted,
+		Movie:  &models.Movie{ID: "prior"},
+	})
+	store.UpdateFileResult("/skipped-failure", &resultstore.MovieResult{
+		Status: models.JobStatusFailed,
+		Movie:  &models.Movie{ID: "skipped"},
+	})
+	inputs := applyPhaseInputs{
+		Results: map[string]*resultstore.MovieResult{
+			"/prior-failure":    {Status: models.JobStatusFailed, Movie: &models.Movie{ID: "prior"}},
+			"/skipped-failure":  {Status: models.JobStatusFailed, Movie: &models.Movie{ID: "skipped"}},
+			"/scrape-failure":   {Status: models.JobStatusFailed}, // no Movie: ineligible for apply
+			"/excluded-failure": {Status: models.JobStatusFailed, Movie: &models.Movie{ID: "excluded"}},
+		},
+		Excluded: map[string]bool{"/excluded-failure": true},
+		Updater:  store,
+	}
+	outcomes := []applyFileOutcome{
+		{FilePath: "/prior-failure", Success: true},
+		{FilePath: "/skipped-failure", Success: true},
+		{FilePath: "/apply-failure", Failed: true},
+		{FilePath: "/apply-panic", Panic: true},
+	}
+
+	// Only the live Completed row is cleared. A workflow success whose write-back
+	// was skipped must remain retryable, while nil-movie scrape failures stay out.
+	assert.Equal(t, int64(3), countRemainingApplyFailures(inputs, outcomes))
 }

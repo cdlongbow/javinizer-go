@@ -93,9 +93,21 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 		fileResult *resultstore.MovieResult
 		movie      *models.Movie
 	}
+	retryPaths := make(map[string]struct{}, len(cfg.RetryFilePaths))
+	for _, filePath := range cfg.RetryFilePaths {
+		retryPaths[filePath] = struct{}{}
+	}
 	items := make([]applyItem, 0, len(inputs.Results))
 	for filePath, fileResult := range inputs.Results {
-		if fileResult.Status != models.JobStatusCompleted || fileResult.Movie == nil {
+		_, retryFailed := retryPaths[filePath]
+		if fileResult.Movie == nil {
+			continue
+		}
+		if len(retryPaths) > 0 {
+			if !retryFailed || (fileResult.Status != models.JobStatusFailed && fileResult.Status != models.JobStatusCompleted) {
+				continue
+			}
+		} else if fileResult.Status != models.JobStatusCompleted {
 			continue
 		}
 		if excludedSnapshot[filePath] {
@@ -158,7 +170,15 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	trackApplyResults(inputs, outcomes, &organized, &failed)
 
 	orgCount := atomic.LoadInt64(&organized)
+	// A normal apply intentionally skips failures produced by the scrape phase;
+	// those rows have no eligible apply outcome and must not prevent successful
+	// files from reaching Organized. A subset retry, however, must retain any
+	// failed rows that were not selected, so it stays Completed until all
+	// remaining failures are retried.
 	failCount := atomic.LoadInt64(&failed)
+	if len(cfg.RetryFilePaths) > 0 {
+		failCount = countRemainingApplyFailures(inputs, outcomes)
+	}
 
 	// Broadcast the final organization_completed / update_completed WebSocket
 	// message BEFORE MarkOrganized / MarkCompleted so frontend clients
@@ -175,6 +195,44 @@ func (p *applyPhase) Run(ctx context.Context, inputs applyPhaseInputs, cfg Apply
 	} else {
 		inputs.Lifecycle.MarkCompleted()
 	}
+}
+
+// retryWritebackClearedFailure confirms a successful retry actually cleared
+// the live result's failed status. The frozen apply input cannot prove that:
+// identity and promote-witness fences, or a write error, may skip write-back
+// while interpretApplyResult still reports the workflow success.
+func retryWritebackClearedFailure(inputs applyPhaseInputs, outcome applyFileOutcome) bool {
+	reader, ok := inputs.Updater.(interface {
+		GetMovieResult(string) (*resultstore.MovieResult, error)
+	})
+	if !ok {
+		return false
+	}
+	current, err := reader.GetMovieResult(outcome.FilePath)
+	return err == nil && current != nil && current.Status == models.JobStatusCompleted
+}
+
+// countRemainingApplyFailures returns the failures that remain after this apply
+// attempt. The apply input is a frozen snapshot, so a subset retry must remove
+// only paths that succeeded in this attempt while retaining eligible failures
+// that were not selected. Scrape failures without a movie cannot produce an
+// apply outcome and must not keep a successful retry from reaching Organized.
+func countRemainingApplyFailures(inputs applyPhaseInputs, outcomes []applyFileOutcome) int64 {
+	failedPaths := make(map[string]struct{})
+	for filePath, result := range inputs.Results {
+		if result != nil && result.Movie != nil && !inputs.Excluded[filePath] && result.Status == models.JobStatusFailed {
+			failedPaths[filePath] = struct{}{}
+		}
+	}
+	for _, outcome := range outcomes {
+		if outcome.Success && retryWritebackClearedFailure(inputs, outcome) {
+			delete(failedPaths, outcome.FilePath)
+		}
+		if outcome.Failed || outcome.Panic {
+			failedPaths[outcome.FilePath] = struct{}{}
+		}
+	}
+	return int64(len(failedPaths))
 }
 
 // buildApplyCmd constructs the workflow.ApplyCmd for a single file apply.
@@ -446,6 +504,12 @@ func interpretApplyResult(
 						return current, prov, nil
 					}
 					current.Movie = mergeLiveReviewEdits(movie, result.Movie, current.Movie)
+					// A successful explicit retry must clear the prior apply failure so
+					// later retries and reloads do not keep treating this row as failed.
+					if current.Status == models.JobStatusFailed {
+						current.Status = models.JobStatusCompleted
+						current.Error = ""
+					}
 					return current, mergeWriteBackProvenance(inputs.Provenance[filePath], prov), nil
 				})
 				if err2 != nil {

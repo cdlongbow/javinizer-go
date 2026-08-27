@@ -313,6 +313,7 @@ func (job *BatchJob) snapshotFull() batchJobSnapshot {
 			PersistError:          job.persistError,
 			IsDeleted:             lcSnap.IsDeleted,
 			CurrentPhase:          lcSnap.CurrentPhase,
+			ApplyGeneration:       lcSnap.ApplyGeneration,
 		},
 		results:     resultSnap.Results,
 		provenance:  resultSnap.Provenance,
