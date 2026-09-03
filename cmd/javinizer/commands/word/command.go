@@ -73,6 +73,7 @@ func NewCommand() *cobra.Command {
 	}
 	wordImportCmd.Flags().Bool("include-defaults", false, "Include seeded default replacements in import")
 
+	wordAddCmd.Flags().String("mode", models.MatchModeLiteral, "Match mode: literal or wildcard (#228)")
 	wordCmd.AddCommand(wordListCmd, wordAddCmd, wordRemoveCmd, wordExportCmd, wordImportCmd)
 	return wordCmd
 }
@@ -102,11 +103,12 @@ func runWordList(cmd *cobra.Command, args []string, configFile string) error {
 	}
 
 	fmt.Println("=== Word Replacements ===")
-	fmt.Printf("%-30s -> %s\n", "Original", "Replacement")
+	fmt.Printf("%-30s -> %-30s [%s]\n", "Original", "Replacement", "Mode")
 	fmt.Println(strings.Repeat("-", 65))
 
 	for _, r := range replacements {
-		fmt.Printf("%-30s -> %s\n", r.Original, r.Replacement)
+		// Schema guarantees match_mode is set (NOT NULL DEFAULT 'literal').
+		fmt.Printf("%-30s -> %-30s [%s]\n", r.Original, r.Replacement, r.MatchMode)
 	}
 
 	fmt.Printf("\nTotal: %d replacements\n", len(replacements))
@@ -117,6 +119,18 @@ func runWordList(cmd *cobra.Command, args []string, configFile string) error {
 func runWordAdd(cmd *cobra.Command, args []string, configFile string) error {
 	original := args[0]
 	replacement := args[1]
+	if strings.TrimSpace(original) == "" {
+		return fmt.Errorf("original must not be empty")
+	}
+
+	mode, flagErr := cmd.Flags().GetString("mode")
+	if flagErr != nil || mode == "" {
+		// Direct (non-cobra) callers have no flag registered; default literal.
+		mode = models.MatchModeLiteral
+	}
+	if !models.IsValidMatchMode(mode) {
+		return fmt.Errorf("invalid --mode %q (valid: %s, %s)", mode, models.MatchModeLiteral, models.MatchModeWildcard)
+	}
 
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
@@ -134,6 +148,7 @@ func runWordAdd(cmd *cobra.Command, args []string, configFile string) error {
 	wordReplacement := &models.WordReplacement{
 		Original:    original,
 		Replacement: replacement,
+		MatchMode:   mode,
 	}
 
 	if err := repo.Upsert(context.Background(), wordReplacement); err != nil {
@@ -229,6 +244,20 @@ func runWordImport(cmd *cobra.Command, args []string, configFile string) error {
 		return fmt.Errorf("no word replacements found in import file")
 	}
 
+	// Hard-fail up front: an unknown match_mode aborts the import with
+	// nothing stored; a missing mode normalizes to literal. (#228)
+	for i := range replacements {
+		if strings.TrimSpace(replacements[i].Original) == "" {
+			return fmt.Errorf("empty original at index %d in import file", i)
+		}
+		if replacements[i].MatchMode == "" {
+			continue
+		}
+		if !models.IsValidMatchMode(replacements[i].MatchMode) {
+			return fmt.Errorf("invalid match_mode %q for %q (valid: %s, %s)", replacements[i].MatchMode, replacements[i].Original, models.MatchModeLiteral, models.MatchModeWildcard)
+		}
+	}
+
 	cfg, err := config.LoadOrCreate(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load config: %w", err)
@@ -256,7 +285,13 @@ func runWordImport(cmd *cobra.Command, args []string, configFile string) error {
 
 		existing, err := repo.FindByOriginal(context.Background(), r.Original)
 		if err == nil {
-			if existing.Replacement == r.Replacement {
+			// Import-side normalization (missing JSON mode => literal);
+			// existing rows always carry a mode (schema default).
+			newMode := r.MatchMode
+			if newMode == "" {
+				newMode = models.MatchModeLiteral
+			}
+			if existing.Replacement == r.Replacement && existing.MatchMode == newMode {
 				skipped++
 				continue
 			}
