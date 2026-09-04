@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 
@@ -145,9 +144,28 @@ func withDestDirSharedLock(dir string, fn func() error) error {
 // Identity is evaluated with no-follow Lstat on both sides; the source's own symlink
 // status is Mint vital — a source symlink pointing at the destination's regular inode
 // is NOT an alias (it doesn't share that destination's name-bearing link).
-func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameInode bool, err error) {
+// classifyExistingDestination inspects the destination with kind information so
+// authorization decisions can be scoped per-kind (from #224 Phase C). It is the
+// single classification authority; refuseExistingDestination renders its
+// refusal sentence for unauthorized flows; authorized flows consult its kinds
+// (symlink/dir always conflict)
+// Lanes: identical (lexical self — never touched), sameInode (hardlink
+// alias — no-op), occupied+kind, or unoccupied.
+// destinationClassification is the four-way outcome of looking at the
+// destination: identical (lexical-self — never touch), sameInode (hardlink
+// alias — no-op), Conflict (with Kind), or unoccupied (Err==nil,
+// Conflict==nil). Struct return avoids the (conflict != nil, err == nil)
+// shape nilerr hates.
+type destinationClassification struct {
+	Identical bool
+	SameInode bool
+	Conflict  *PlanConflict
+	Err       error
+}
+
+func classifyExistingDestination(fs afero.Fs, src, dst string) destinationClassification {
 	if filepath.Clean(src) == filepath.Clean(dst) {
-		return true, true, nil
+		return destinationClassification{Identical: true, SameInode: true}
 	}
 	var lstatDst, lstatSrc os.FileInfo
 	var dstErr, srcErr error
@@ -168,24 +186,44 @@ func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameIno
 	// LstatIfPossible reporting didLstat=false), probe ReadlinkIfPossible so an
 	// unauthorized operation never silently replaces a symlink object.
 	if dstErr != nil && errors.Is(dstErr, os.ErrNotExist) && !dstLstat && symlinkObjectExists(fs, dst) {
-		return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+		return destinationClassification{Conflict: &PlanConflict{Path: dst, Kind: ConflictSymlink}}
 	}
 	if dstErr == nil {
-		if dstLstat && lstatDst.Mode()&os.ModeSymlink != 0 {
-			return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+		if lstatDst.Mode()&os.ModeSymlink != 0 {
+			return destinationClassification{Conflict: &PlanConflict{Path: dst, Kind: ConflictSymlink}}
+		}
+		// A following Stat succeeded but never truly lstat'd the object — a
+		// VMSyed/fs boundary could misreport a live symlink as a plain file.
+		// Probe for one when no true Lstat happened (#224 codex P2).
+		if !dstLstat && symlinkObjectExists(fs, dst) {
+			return destinationClassification{Conflict: &PlanConflict{Path: dst, Kind: ConflictSymlink}}
 		}
 		if lstatDst.IsDir() {
-			return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+			return destinationClassification{Conflict: &PlanConflict{Path: dst, Kind: ConflictDirectory}}
 		}
 		if srcErr != nil || (srcLstat && lstatSrc.Mode()&os.ModeSymlink != 0) || !os.SameFile(lstatSrc, lstatDst) {
-			return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", dst)
+			return destinationClassification{Conflict: &PlanConflict{Path: dst, Kind: ConflictFile}}
 		}
-		return false, true, nil
+		return destinationClassification{SameInode: true}
 	}
 	if !errors.Is(dstErr, os.ErrNotExist) {
-		return false, false, fmt.Errorf("failed to check destination: %w", dstErr)
+		return destinationClassification{Err: fmt.Errorf("failed to check destination: %w", dstErr)}
 	}
-	return false, false, nil
+	return destinationClassification{}
+}
+
+// refuseExistingDestination is the unauthorized-lane classifier: identical
+// (never touch), sameInode means alias no-op, and conflicts map onto the Kind
+// taxonomy (classifyExistingDestination).
+func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameInode bool, err error) {
+	c := classifyExistingDestination(fs, src, dst)
+	if c.Err != nil {
+		return false, false, c.Err
+	}
+	if c.Conflict != nil {
+		return false, false, fmt.Errorf("file already exists at destination (refusing to overwrite): %s", c.Conflict.Path)
+	}
+	return c.Identical, c.SameInode, nil
 }
 
 // mapNoReplaceRefusal translates the fsutil no-replace failure classes into the
@@ -193,6 +231,20 @@ func refuseExistingDestination(fs afero.Fs, src, dst string) (identical, sameIno
 // conflict the classifier reports, while a volume that cannot express an
 // atomic no-replace publish surfaces as a DISTINCT infrastructure refusal —
 // never as a content conflict.
+// destMaybeLstat probes dst without ever following links where the fs can,
+// and says whether the probing was truly no-follow. When didLstat=false the
+// info came from a link-following Stat (wrapping non-Lister or Listers whose
+// deferred Lstat gave up), so a caller CANNOT tell a live symlink from a
+// regular file from info alone — it must probe via readlink separately.
+func destMaybeLstat(fs afero.Fs, dst string) (os.FileInfo, bool, error) {
+	if lst, ok := fs.(afero.Lstater); ok {
+		info, did, lerr := lst.LstatIfPossible(dst)
+		return info, !did, lerr
+	}
+	info, err := fs.Stat(dst)
+	return info, true, err
+}
+
 func mapNoReplaceRefusal(err error, dst string) error {
 	switch {
 	// Completed-first (#224 P2): a cleanup-refusal error carries publish
@@ -314,7 +366,7 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 		if folderName == "" {
 			folderName = template.SanitizeFolderPath(match.MovieID)
 			if folderName == "" {
-				folderName = "unknown"
+				folderName = folderFallbackUnknown
 			}
 		}
 	}
@@ -332,6 +384,14 @@ func (s *organizeStrategy) Plan(match models.FileMatchInfo, movie *models.Movie,
 	willMove := filepath.ToSlash(match.Path) != filepath.ToSlash(targetPath)
 
 	conflicts := checkTargetConflict(s.fs, match.Path, targetPath, forceUpdate, willMove)
+	// Target dir exists as a regular FILE today — nothing can be created under
+	// it, and organizing must surface this as a directory conflict through
+	// plan conflicts (not a deep MkdirAll failure) (#224 task 3.3).
+	if willMove {
+		if fi, statErr := s.fs.Stat(targetDir); statErr == nil && !fi.IsDir() {
+			conflicts = append(conflicts, PlanConflict{Path: targetDir, Kind: ConflictDirectory})
+		}
+	}
 
 	var subfolderPath string
 	if len(subfolderParts) > 0 {
@@ -381,7 +441,18 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 	// Move path: moveFiles=true (default) — rename source to target
 	if plan.moveFiles {
 		move := func() error {
-			if !plan.overwriteAuthorized {
+			if plan.overwriteAuthorized {
+				// Authorized: still classify (#224 Phase C) — symlink/dir dests
+				// refuse regardless of authorization; file dests replace; self
+				// and same-inode stay no-ops even here.
+				identical, sameIn, err := refuseIfUnsuppressibleAuthorizedDestination(s.fs, plan.SourcePath, plan.TargetPath)
+				if err != nil {
+					return err
+				}
+				if identical || sameIn {
+					return nil
+				}
+			} else {
 				identical, sameIn, err := refuseExistingDestination(s.fs, plan.SourcePath, plan.TargetPath)
 				if err != nil {
 					return err
@@ -424,7 +495,7 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 
 	// Copy/link path (absorbed from CopyWithLinkMode)
 	if len(plan.Conflicts) > 0 {
-		result.Error = fmt.Errorf("conflicts detected: %s", strings.Join(plan.Conflicts, "; "))
+		result.Error = fmt.Errorf("conflicts detected: %s", joinPlanConflictPaths(plan.Conflicts))
 		return result, result.Error
 	}
 
@@ -463,11 +534,27 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 				return fmt.Errorf("failed to create directory: %w", err)
 			}
 
-			// Remove an existing target ONLY for an authorized replacement. Unauthorized
-			// paths never remove (their conversion output of choice must be won via
-			// refusal-and-fail). A lexical self-path is also never removed.
-			// Same-inode hardlinks under unauthorized mode are idempotent (returned early).
+			// Remove an existing target ONLY for an authorized replacement of a
+			// REGULAR FILE — symlinks, directories, and everything else at the
+			// destination are always refused (#224). Gated on IsRegular.
 			if plan.LinkMode != LinkModeNone && !dstLexicalSelf && plan.overwriteAuthorized {
+				var linfo os.FileInfo
+				var lerr error
+				if lst, ok := s.fs.(afero.Lstater); ok {
+					linfo, _, lerr = lst.LstatIfPossible(plan.TargetPath)
+				} else {
+					linfo, lerr = s.fs.Stat(plan.TargetPath)
+				}
+				if lerr != nil {
+					if !os.IsNotExist(lerr) {
+						return fmt.Errorf("failed to inspect target before link install: %w", lerr)
+					}
+				} else if !linfo.Mode().IsRegular() {
+					// Anything not a regular file (directory, symlink object,
+					// device…) at the destination must not be removed before
+					// installing the link output (#224 hole 1).
+					return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
+				}
 				if err := s.fs.Remove(plan.TargetPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 					return fmt.Errorf("failed to prepare target path for link: %w", err)
 				}
@@ -513,6 +600,27 @@ func (s *organizeStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) 
 						return mapNoReplaceRefusal(fmt.Errorf("failed to copy file: %w", err), plan.TargetPath)
 					}
 					return nil
+				}
+				// Authorized copy lane: the regular-file gate is also needed here —
+				// a symlink/directory destination must refuse regardless of
+				// authorization (#224 codex P1). dstLexicalSelf never reaches here
+				// (refused at classification).
+				if plan.overwriteAuthorized && !dstLexicalSelf {
+					linfo, followed, lerr := destMaybeLstat(s.fs, plan.TargetPath)
+					if lerr != nil && !errors.Is(lerr, os.ErrNotExist) {
+						return fmt.Errorf("failed to inspect target before copy: %w", lerr)
+					}
+					if linfo != nil {
+						// A link-following Stat on no-Lstat wrappers reads through a live
+						// symlink as a regular file; when "followed" we probe via readlink,
+						// and non-regular detectors just refuse.
+						if followed && symlinkObjectExists(s.fs, plan.TargetPath) {
+							return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
+						}
+						if !linfo.Mode().IsRegular() {
+							return fmt.Errorf("destination is not a regular file (cannot authorize-over): %s", plan.TargetPath)
+						}
+					}
 				}
 				if err := s.linker.copyFile(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
 					return fmt.Errorf("failed to copy file: %w", err)
