@@ -35,12 +35,23 @@ const (
 var cachedUmask atomic.Int32
 
 func init() {
-	cachedUmask.Store(0)
+	// Capture the process's inherited umask up front (probe-and-restore is
+	// thread-unsafe; init runs before anything else). StoreUmask from config
+	// overrides this at startup when a setting is applied.
+	cachedUmask.Store(int32(currentProcessUmask()))
 }
 
 // StoreUmask caches the provided umask value for later use.
 func StoreUmask(mask int) {
 	cachedUmask.Store(int32(mask))
+}
+
+// UmaskValue returns the cached process umask bits (0 when unset). The value
+// is used to re-derive the mode an OpenFile-style create would have inherited
+// from the kernel — exclusive staging asserts exact modes through Chmod, which
+// bypasses the umask, so parity requires masking explicitly (#224 codex P1).
+func UmaskValue() int {
+	return int(cachedUmask.Load())
 }
 
 // ValidateHTTPBaseURL checks that raw is a valid HTTP or HTTPS URL.

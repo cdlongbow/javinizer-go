@@ -309,11 +309,16 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 							return nil // inner target names the same file — nothing to rename
 						}
 					}
-					if err := s.fs.Rename(currentFilePath, plan.TargetPath); err != nil {
-						if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
-							logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
-						}
-						return fmt.Errorf("failed to rename file after directory rename: %w", err)
+					// #224: inner file rename is a terminal op of the same race class
+					// — publish no-replace so a plant inside the renamed dir conflicts
+					// atomically instead of being replaced. On collision, roll the
+					// directory rename back exactly as before.
+					innerOp := fsutil.PublishNoReplace
+					if plan.overwriteAuthorized {
+						innerOp = func(fs afero.Fs, a, b string) error { return fs.Rename(a, b) }
+					}
+					if err := innerOp(s.fs, currentFilePath, plan.TargetPath); err != nil {
+						return s.finishInPlaceInnerRename(plan, err)
 					}
 				}
 				return nil
@@ -344,6 +349,12 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 				if err := s.fs.MkdirAll(plan.TargetDir, config.DirPerm); err != nil {
 					return fmt.Errorf("failed to create directory: %w", err)
 				}
+				if !plan.overwriteAuthorized {
+					if err := fsutil.MoveFileNoReplace(s.fs, plan.SourcePath, plan.TargetPath); err != nil {
+						return mapNoReplaceRefusal(err, plan.TargetPath)
+					}
+					return nil
+				}
 				return fsutil.MoveFileFs(s.fs, plan.SourcePath, plan.TargetPath)
 			})
 		})
@@ -356,4 +367,16 @@ func (s *inPlaceStrategy) Execute(plan *OrganizePlan) (*OrganizeResult, error) {
 	}
 
 	return result, nil
+}
+
+// finishInPlaceInnerRename is only invoked on an inner-op failure (call site
+// guarantees err != nil), so branches reach every classification.
+func (s *inPlaceStrategy) finishInPlaceInnerRename(plan *OrganizePlan, err error) error {
+	if fsutil.PublishCompleted(err) {
+		return fmt.Errorf("in-place inner rename published to %s but finished ambiguously (directory left at %s): %w", plan.TargetPath, plan.TargetDir, err)
+	}
+	if rb := s.fs.Rename(plan.TargetDir, plan.OldDir); rb != nil {
+		logging.Errorf("[in-place] Failed to rollback directory rename %s → %s: %v", plan.TargetDir, plan.OldDir, rb)
+	}
+	return fmt.Errorf("failed to rename file after directory rename: %w", mapNoReplaceRefusal(err, plan.TargetPath))
 }
