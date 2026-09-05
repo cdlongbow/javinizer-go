@@ -30,9 +30,11 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 		"Revision":      "internal versioning counter, not exposed to API consumers",
 		"FileMatchInfo": "flattened into BatchFileResult top-level fields (FilePath, MovieID, IsMultiPart, PartNumber, PartSuffix)",
 		// OrchestrationState is embedded — its sub-fields are checked separately below.
-		// The OrchestrationState itself (DisplayTitleApplied, PosterGenerated, Persisted,
-		// PosterError, TranslationWarning) is internal orchestration metadata not exposed
-		// in the API response.
+		// DisplayTitleApplied, PosterGenerated, Persisted, and PosterError are internal
+		// orchestration metadata not exposed in the API response. TranslationWarning and
+		// TranslationWarningCode ARE exposed (translation-warning-display change): the
+		// full BatchFileResult carries both and BatchFileResultSlim carries the code only,
+		// pinned by the translation_warning_fields_exposed subtest below.
 	}
 
 	// Fields intentionally omitted from the slim variant (in addition to full unmapped).
@@ -151,6 +153,55 @@ func TestMovieResultToBatchFileResultDriftGuard(t *testing.T) {
 				t.Errorf("BatchFileResultSlim has field %q that doesn't exist in BatchFileResult. "+
 					"Slim should be a strict subset of full.", field)
 			}
+		}
+	})
+
+	// Pin the translation-warning-display exposure: the blanket
+	// isOrchestrationStateField skip above would let these silently drift.
+	t.Run("translation_warning_fields_exposed", func(t *testing.T) {
+		if !bfrFieldNames["TranslationWarning"] {
+			t.Errorf("BatchFileResult must expose TranslationWarning (translation-warning-display)")
+		}
+		if !bfrFieldNames["TranslationWarningCode"] {
+			t.Errorf("BatchFileResult must expose TranslationWarningCode (translation-warning-display)")
+		}
+		if !bfrSlimFieldNames["TranslationWarningCode"] {
+			t.Errorf("BatchFileResultSlim must expose TranslationWarningCode (code-only slim badge)")
+		}
+		if bfrSlimFieldNames["TranslationWarning"] {
+			t.Errorf("BatchFileResultSlim must NOT expose TranslationWarning (slim payload is code-only)")
+		}
+	})
+
+	// The bulk-rescrape per-movie contract surfaces the same code so the review
+	// UI can badge translation degradations after a bulk rescrape.
+	t.Run("bulk_rescrape_result_exposes_translation_warning_code", func(t *testing.T) {
+		f, ok := reflect.TypeOf(contracts.BulkRescrapeMovieResult{}).FieldByName("TranslationWarningCode")
+		if !ok {
+			t.Errorf("BulkRescrapeMovieResult must expose TranslationWarningCode (bulk rescrape badge)")
+			return
+		}
+		if tag := f.Tag.Get("json"); tag != "translation_warning_code,omitempty" {
+			t.Errorf("BulkRescrapeMovieResult.TranslationWarningCode json tag = %q, want translation_warning_code,omitempty", tag)
+		}
+	})
+
+	// The single-result rescrape response carries BOTH fields so the review UI
+	// can replace (or, when omitted, clear) the stale per-result warning without
+	// a refetch — this endpoint issues no progress broadcast.
+	t.Run("single_rescrape_response_exposes_translation_warning_fields", func(t *testing.T) {
+		respType := reflect.TypeOf(contracts.BatchRescrapeResponse{})
+		wf, ok := respType.FieldByName("TranslationWarning")
+		if !ok {
+			t.Errorf("BatchRescrapeResponse must expose TranslationWarning (single rescrape warning replace/clear)")
+		} else if tag := wf.Tag.Get("json"); tag != "translation_warning,omitempty" {
+			t.Errorf("BatchRescrapeResponse.TranslationWarning json tag = %q, want translation_warning,omitempty", tag)
+		}
+		cf, ok := respType.FieldByName("TranslationWarningCode")
+		if !ok {
+			t.Errorf("BatchRescrapeResponse must expose TranslationWarningCode (single rescrape warning replace/clear)")
+		} else if tag := cf.Tag.Get("json"); tag != "translation_warning_code,omitempty" {
+			t.Errorf("BatchRescrapeResponse.TranslationWarningCode json tag = %q, want translation_warning_code,omitempty", tag)
 		}
 	})
 }

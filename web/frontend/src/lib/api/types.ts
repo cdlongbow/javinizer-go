@@ -57,6 +57,39 @@ export interface ScrapeRequest {
 	selected_scrapers?: string[];
 }
 
+/**
+ * Machine-readable classification of a metadata-translation failure or
+ * degradation (translation-warning-display). Parallel to ScraperErrorKind:
+ * `unavailable` means "no usable response" in both; `unknown` is the fallback.
+ * The UI localizes known codes and falls back to the raw `translation_warning`.
+ */
+export type TranslationWarningCode =
+	| 'rate_limited'
+	| 'unauthorized'
+	| 'forbidden'
+	| 'request_error'
+	| 'service_error'
+	| 'unavailable'
+	| 'degraded'
+	| 'unknown';
+
+/** POST /api/v1/scrape response (backend contracts.ScrapeResponse). */
+export interface ScrapeResponse {
+	cached?: boolean;
+	movie: Movie;
+	sources_used?: number;
+	errors?: string[];
+	translation_warning?: string;
+	translation_warning_code?: TranslationWarningCode;
+}
+
+/** Return shape of scrapeMovie/rescrapeMovie (warning fields populated on partial/degraded translation). */
+export interface ScrapeMovieResult {
+	movie: Movie;
+	translation_warning?: string;
+	translation_warning_code?: TranslationWarningCode;
+}
+
 export type OperationMode =
 	| 'organize'
 	| 'in-place'
@@ -268,6 +301,13 @@ export interface BatchRescrapeResponse {
 	movie: Movie;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
+	/**
+	 * Translation warning fields produced by THIS rescrape; omitted when the
+	 * rescrape was translation-clean (this endpoint emits no progress
+	 * broadcast, so absence means clear, not "unknown").
+	 */
+	translation_warning?: string;
+	translation_warning_code?: TranslationWarningCode;
 	/** Fresh post-commit result revision (CAS baseline). */
 	revision?: number;
 	revisions?: Record<string, number>;
@@ -292,6 +332,8 @@ export interface BulkRescrapeMovieResult {
 	status: 'success' | 'failed';
 	error?: string;
 	movie?: Movie;
+	/** Machine-readable translation warning classification (omitted when clean). */
+	translation_warning_code?: TranslationWarningCode;
 }
 
 export interface BulkRescrapeResponse {
@@ -369,6 +411,12 @@ export interface FileResult {
 	revision?: number;
 	error?: string;
 	error_code?: ScraperErrorKind;
+	/**
+	 * Translation warning fields (full results). Slim payloads carry the code
+	 * only, so mid-run badges must key off `translation_warning_code` alone.
+	 */
+	translation_warning?: string;
+	translation_warning_code?: TranslationWarningCode;
 	field_sources?: Record<string, string>;
 	actress_sources?: Record<string, string>;
 	movie?: Movie;

@@ -349,6 +349,43 @@ or count is a build error.
 ascending alphabetical order. Preserve that ordering when editing by hand
 (re-running the compiler will re-sort).
 
+### Code-keyed families: `review_error_*` and `translation_warning_*`
+
+Some messages are selected by a **stable machine code** returned by the API
+rather than by page context. Two families exist:
+
+- `review_error_*` — keyed off `FileResult.error_code` for failed/unidentified
+  files.
+- `translation_warning_*` — keyed off `translation_warning_code`, exposed on
+  batch file results (full result carries `translation_warning` +
+  `translation_warning_code`; the slim polling payload carries the code only),
+  on `POST /api/v1/scrape`, and on `POST /api/v1/movies/{id}/rescrape`
+  responses when metadata translation fails or degrades. Known codes:
+  `rate_limited`, `unauthorized`, `forbidden`, `request_error`,
+  `service_error`, `unavailable`, `degraded`. The code `unknown` (or a missing
+  code) has **no** catalog key — the UI falls back to the backend's raw English
+  `translation_warning` string, so each locale file carries exactly the seven
+  known-code keys.
+
+Rules specific to the `translation_warning_*` keys:
+
+- **Rate-limit display prefers the backend's raw warning when present** —
+  it names the actual provider + mode (e.g. "Google Translate (free)") and
+  remediation. The localized `translation_warning_rate_limited` key is
+  therefore provider-neutral fallback copy, rendered only on slim (code-only)
+  payloads where the raw string is absent. Preserve its cause → remedy
+  structure (rate limited → retry later, switch translation provider, or
+  configure paid mode with an API key under Settings) when translating.
+- Say plainly that affected fields kept their **original** text (these are
+  non-fatal, keep-original degradations — English copy does this).
+- Slim polling payloads carry only the code, so the copy must stand on its own
+  without the raw backend string.
+
+For operators: the backend also emits exactly one structured Warn log line per
+movie with fields `{provider, mode, source_lang, target_lang, warning_code,
+movie_id}` plus `status_code` when the code came from an HTTP status. Those log
+lines are diagnostic English by design and are never localized.
+
 ---
 
 ## TUI catalog format (go-i18n)

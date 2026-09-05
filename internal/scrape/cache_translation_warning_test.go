@@ -2,11 +2,18 @@ package scrape
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/javinizer/javinizer-go/internal/config"
 	"github.com/javinizer/javinizer-go/internal/database"
+	"github.com/javinizer/javinizer-go/internal/logging"
 	"github.com/javinizer/javinizer-go/internal/models"
 	"github.com/javinizer/javinizer-go/internal/translation"
 	"github.com/stretchr/testify/assert"
@@ -19,32 +26,16 @@ import (
 // than the translation logic itself (already covered by apply_translation tests).
 type stubWarningTranslatorCacheTest struct {
 	warning string
+	code    string
 }
 
-func (s *stubWarningTranslatorCacheTest) Translate(_ context.Context, _ *models.Movie) (string, bool, *translation.TranslationOutput) {
-	return s.warning, true, nil
+func (s *stubWarningTranslatorCacheTest) Translate(_ context.Context, _ *models.Movie) (string, string, bool, *translation.TranslationOutput) {
+	return s.warning, s.code, true, nil
 }
 
-// TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning is a
-// regression test for the "field dropped on rebuild/fallback path" pattern.
-//
-// Bug (commit fixing this): internal/scrape/cache.go's tryCache computed
-// `warn := applyTranslation(ctx, cached, s.translator)` on the
-// "translation settings changed → re-translate the cached movie" branch,
-// logged it, then DISCARDED it — the returned *ScrapeResult had an empty
-// TranslationWarning even though applyTranslation had produced a non-empty
-// warning. The happy-path postProcessScraped (scrape.go:242) DID set
-// TranslationWarning on its ScrapeResult, but cache.go did not. Same pattern
-// as commits 83fba0c5 / d9106a96 / 42d89e65 / 6249de64 / 6ed5d0e5 — a fresh
-// struct (ScrapeResult) built on a "fallback / cache-hit / alternate" path
-// dropped a field main's happy path populated.
-//
-// Downstream consumer: workflow/scrape_orchestrator.go:91-93 reads
-// result.TranslationWarning and copies it into meta.TranslationWarning;
-// worker/movie_result.go stamps mr.OrchestrationState = meta.OrchestrationState;
-// api/batch/convert.go surfaces it as `translation_warning` on the API response.
-// So a cache-hit with re-translated settings previously surfaced an empty
-// warning even when the re-translation was partial.
+// TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning proves
+// the stale-hash cache-hit re-translation branch surfaces the warning (and code)
+// on the rebuilt ScrapeResult instead of discarding it.
 func TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning(t *testing.T) {
 	// Build the scraper with translation ENABLED, but with settings that
 	// differ from what the cached movie was translated under → forces the
@@ -89,7 +80,7 @@ func TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning(t *tes
 	require.NoError(t, err)
 
 	expectedWarning := "partial translation: timeout from OpenAI"
-	translator := &stubWarningTranslatorCacheTest{warning: expectedWarning}
+	translator := &stubWarningTranslatorCacheTest{warning: expectedWarning, code: "degraded"}
 
 	scrapeCfg := &Config{
 		ScrapersPriority:      cfg.Scrapers.Priority,
@@ -109,7 +100,100 @@ func TestTryCache_RetranslationSettingsChangePropagatesTranslationWarning(t *tes
 		"re-translation branch should have run and set either NeedsPersistence or TranslationWarning")
 	assert.True(t, result.NeedsPersistence, "re-translated cache hit must set NeedsPersistence for re-persistence")
 	assert.Equal(t, expectedWarning, result.TranslationWarning,
-		"cache-hit re-translation must surface applyTranslation's warning on ScrapeResult.TranslationWarning — "+
-			"the field was computed and logged but discarded before this fix (same dropped-on-fallback-path "+
-			"pattern as 83fba0c5 / 42d89e65 / 6ed5d0e5)")
+		"cache-hit re-translation must surface applyTranslation's warning on ScrapeResult.TranslationWarning")
+	assert.Equal(t, "degraded", result.TranslationWarningCode,
+		"cache-hit re-translation must surface the machine-readable warning code alongside the string")
+}
+
+// warningLogEntries returns the parsed warning-level log entries that carry
+// the given movie_id, from a JSON-format log file produced by initLoggerToFile.
+func warningLogEntries(t *testing.T, logPath, movieID string) []map[string]any {
+	t.Helper()
+	raw, err := os.ReadFile(logPath)
+	require.NoError(t, err)
+	var entries []map[string]any
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry["level"] == "warning" && entry["movie_id"] == movieID {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
+}
+
+// TestTryCache_RetranslationEmitsSingleStructuredWarn proves the cache-hit
+// re-translation path emits exactly ONE structured Warn per movie (with the
+// full field set) while surfacing BOTH translation_warning and
+// translation_warning_code on the rebuilt ScrapeResult — regression coverage
+// for the previous two-unstructured-Warn behavior (sanitize-path + cache-path).
+func TestTryCache_RetranslationEmitsSingleStructuredWarn(t *testing.T) {
+	rateLimitedSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("rate limited"))
+	}))
+	defer rateLimitedSrv.Close()
+
+	logPath := filepath.Join(t.TempDir(), "scrape-test.log")
+	require.NoError(t, logging.InitLogger(&logging.Config{Level: "debug", Format: "json", Output: logPath}))
+	t.Cleanup(func() { logging.CloseLogger() })
+
+	cfg := config.DefaultConfig(nil, nil)
+	cfg.Database.DSN = ":memory:"
+	cfg.Metadata.Translation.Enabled = true
+	cfg.Metadata.Translation.Provider = "openai"
+	cfg.Metadata.Translation.SourceLanguage = "ja"
+	cfg.Metadata.Translation.TargetLanguage = "en"
+	cfg.Metadata.Translation.Fields.Title = true
+	cfg.Metadata.Translation.OpenAI.BaseURL = rateLimitedSrv.URL
+	cfg.Metadata.Translation.OpenAI.APIKey = "test-key"
+	cfg.Metadata.Translation.OpenAI.Model = "gpt-4o-mini"
+	_, err := config.Prepare(cfg)
+	require.NoError(t, err)
+
+	db, err := database.New(&database.Config{Type: cfg.Database.Type, DSN: cfg.Database.DSN, LogLevel: cfg.Database.LogLevel})
+	require.NoError(t, err)
+	require.NoError(t, db.RunMigrationsOnStartup(context.Background()))
+	t.Cleanup(func() { _ = db.Close() })
+
+	movieRepo := database.NewMovieRepository(db)
+	cachedMovie := &models.Movie{
+		ID:    "ABC-429",
+		Title: "キャッシュされたタイトル",
+		Translations: []models.MovieTranslation{
+			{Language: "en", Title: "Cached English Title", SettingsHash: "stale-hash-0001"},
+		},
+	}
+	_, err = movieRepo.Upsert(context.Background(), cachedMovie)
+	require.NoError(t, err)
+
+	translator := NewTranslatorFromApp(&cfg.Metadata.Translation)
+	scrapeCfg := &Config{
+		ScrapersPriority:        cfg.Scrapers.Priority,
+		TranslationEnabled:      true,
+		TranslationTargetLang:   "en",
+		TranslationSettingsHash: "current-hash-9999",
+	}
+	s := New(nil, nil, database.NewActressRepository(db), movieRepo, nil, scrapeCfg, translator, nil)
+
+	result := s.tryCache(context.Background(), ScrapeCmd{MovieID: "ABC-429"}, nil, time.Now())
+
+	require.NotNil(t, result, "cache hit should return a non-nil ScrapeResult")
+	assert.Equal(t, "rate_limited", result.TranslationWarningCode)
+	assert.Contains(t, result.TranslationWarning, "rate limited")
+
+	entries := warningLogEntries(t, logPath, "ABC-429")
+	require.Len(t, entries, 1, "exactly one structured Warn per movie on the cache-hit path")
+	entry := entries[0]
+	assert.Equal(t, "openai", entry["provider"])
+	assert.Equal(t, "", entry["mode"], "openai has no provider mode")
+	assert.Equal(t, "ja", entry["source_lang"])
+	assert.Equal(t, "en", entry["target_lang"])
+	assert.Equal(t, "rate_limited", entry["warning_code"])
+	assert.EqualValues(t, 429, entry["status_code"], "HTTP-status classification carries status_code")
 }
